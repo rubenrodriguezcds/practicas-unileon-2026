@@ -1,0 +1,21 @@
+services:
+  db:
+    build: ./db
+    env_file: .env
+    ports:
+      - "1521:5432"   # 1521 lo pide el profe; dentro Postgres sigue en su 5432
+      - "22:22"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # Por TCP y no por socket: durante el init el servidor temporal solo escucha en socket,
+      # así no se da por sano antes de que existan las tablas.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # web: se añade en la integración (bloque en el spec, lo escribe Sergio).
+
+volumes:
+  pgdata:
