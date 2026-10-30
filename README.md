@@ -27,7 +27,7 @@
 ```mermaid
 flowchart LR
     nav(["Navegador"])
-    dbeaver(["DBeaver / psql"])
+    clientebd(["Cliente de bbdd"])
     sshc(["Cliente SSH"])
 
     subgraph docker["Docker Compose · red interna"]
@@ -44,7 +44,7 @@ flowchart LR
     end
 
     nav -- ":80" --> web
-    dbeaver -- ":1521" --> pg
+    clientebd -- ":1521" --> pg
     sshc -- ":22" --> sshd
 
     classDef webC fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
@@ -52,7 +52,7 @@ flowchart LR
     classDef ext fill:#fef3c7,stroke:#d97706,color:#78350f
     class spa,api webC
     class pg,sshd dbC
-    class nav,dbeaver,sshc ext
+    class nav,clientebd,sshc ext
 ```
 
 | Contenedor | Contenido | Puertos publicados |
@@ -105,7 +105,7 @@ python -c "import secrets;print(secrets.token_hex(32))"
 | Aplicación web | http://localhost/login |
 | Estado de la API | http://localhost/api/health |
 | Documentación de la API | http://localhost/api/docs |
-| Postgres desde el host | `psql -h localhost -p 1521 -U gestor gestor` (o DBeaver con host `localhost`, puerto `1521`) |
+| Consultar la bbdd | `docker compose exec db psql -U gestor -d gestor` (ya incluido), o cualquier cliente de PostgreSQL (DBeaver, pgAdmin…) con host `localhost` y puerto `1521` |
 | SSH al contenedor de bbdd | `ssh -p 22 <SSH_USER>@localhost` |
 | Ver logs | `docker compose logs -f web` / `docker compose logs -f db` |
 | Parar (conserva los datos) | `docker compose down` |
@@ -123,7 +123,8 @@ python -c "import secrets;print(secrets.token_hex(32))"
 > [!WARNING]
 > Si la base de datos no está disponible, la API responde **503** «Base de datos no disponible».
 
-### Flujo de inicio de sesión
+<details>
+<summary><b>Flujo de inicio de sesión, paso a paso</b></summary>
 
 ```mermaid
 sequenceDiagram
@@ -145,6 +146,8 @@ sequenceDiagram
     A-->>F: 200 + cookie HttpOnly
     F-->>U: «Hola, admin»
 ```
+
+</details>
 
 ## Cómo funciona por dentro
 
