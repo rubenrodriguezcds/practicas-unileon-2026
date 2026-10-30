@@ -1,3 +1,12 @@
+/**
+ * Tests de las pantallas (Login, Home) y del guardia de sesión de App.
+ *
+ * Para qué: comprobar lo que ve el usuario: error bajo el botón al fallar el login, botón
+ * desactivado con campos vacíos, saludo y cierre de sesión en orden (primero el servidor, luego
+ * la pantalla), y que los errores de la bbdd se muestran y no se arrastran tras un login correcto.
+ * El cliente de API se simula (vi.mock), así que no hace falta backend.
+ */
+
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -54,6 +63,7 @@ describe('Home', () => {
   })
 })
 
+// Cubre el guard de sesión: errores de me() distintos de 401 y que no se queden pegados tras logout.
 describe('App', () => {
   it('muestra el error de me() distinto de 401', async () => {
     vi.mocked(me).mockRejectedValue(new ApiError(503, 'Base de datos no disponible'))

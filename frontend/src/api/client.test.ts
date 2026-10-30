@@ -1,6 +1,16 @@
+/**
+ * Tests del cliente de API (client.ts) con fetch simulado.
+ *
+ * Para qué: comprobar que las peticiones salen con la forma que espera el backend (ruta, método,
+ * JSON) y que los errores se convierten bien: un 401 del login llega como ApiError con su
+ * mensaje, y un 401 de me() significa «no hay sesión» (null), no un error.
+ * No hace falta backend: fetch se sustituye por un doble.
+ */
+
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiError, login, me } from './client'
 
+// Crea un `fetch` simulado que responde con el status y el cuerpo JSON dados.
 const reply = (status: number, body?: unknown) =>
   vi.fn().mockResolvedValue(
     new Response(body === undefined ? null : JSON.stringify(body), { status }),

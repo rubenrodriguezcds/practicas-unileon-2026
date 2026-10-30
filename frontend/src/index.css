@@ -1,3 +1,10 @@
+/*
+  Estilos globales de la aplicación.
+
+  Para qué: aspecto de las dos pantallas (tarjeta centrada, formulario, botones y mensajes de
+  error). CSS propio y mínimo, sin librería de componentes (decisión del equipo para esta
+  primera entrega); si la app crece, se puede añadir una librería sin tocar la lógica.
+*/
 :root { font-family: system-ui, sans-serif; color: #1f2937; background: #f3f4f6; }
 body { margin: 0; min-height: 100vh; display: grid; place-items: center; }
 #root { width: 100%; }
