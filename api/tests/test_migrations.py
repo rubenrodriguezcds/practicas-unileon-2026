@@ -1,8 +1,8 @@
 """Tests del aplicador de migraciones (migrations.py) sin Postgres.
 
 Para qué: comprobar que solo se aplican las migraciones pendientes, en orden y una vez, y que
-el email del admin se rellena sin pisar uno que ya exista. Además, que la migración de la
-issue #4 es idempotente (IF NOT EXISTS), como exigen las reglas del proyecto.
+el email del admin se rellena sin pisar uno que ya exista. Además, que las migraciones de las
+issues #4 y #5 son idempotentes (IF NOT EXISTS), como exigen las reglas del proyecto.
 
 Cómo: una conexión de mentira que apunta el SQL ejecutado y simula la tabla de control.
 """
@@ -69,3 +69,13 @@ def test_migracion_001_es_idempotente():
     for s in statements:
         code = "\n".join(line for line in s.splitlines() if not line.strip().startswith("--"))
         assert "IF NOT EXISTS" in code, code
+
+
+def test_migracion_002_es_idempotente():
+    # Lleva un UPDATE (marcar al admin), que se puede repetir sin efecto: solo se exige
+    # IF NOT EXISTS a lo que crea o altera esquema.
+    sql = (MIGRATIONS_DIR / "002_roles.sql").read_text(encoding="utf-8")
+    for s in sql.split(";"):
+        code = "\n".join(line for line in s.splitlines() if not line.strip().startswith("--")).strip()
+        if code.startswith(("CREATE", "ALTER")):
+            assert "IF NOT EXISTS" in code, code
