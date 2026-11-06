@@ -1,0 +1,26 @@
+# Secretos: cada uno tiene su .env local; se sube .env.example como plantilla
+.env
+.env.*
+!.env.example
+
+# Datos persistentes de Postgres si se montan en carpeta local
+/pgdata/
+/data/
+
+# Sistema / editores
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log
+
+# Config local de Claude Code
+.claude/
+.superpowers/
+
+# Dependencias y builds
+.venv/
+__pycache__/
+.pytest_cache/
+node_modules/
+dist/

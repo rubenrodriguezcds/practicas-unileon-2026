@@ -1,0 +1,4 @@
+# Todo en LF: los .sh y el código se ejecutan en contenedores Linux y el equipo trabaja en Windows
+* text=auto eol=lf
+*.png binary
+*.ico binary
