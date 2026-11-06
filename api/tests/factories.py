@@ -59,6 +59,9 @@ class FakeDB:
         self.staged = {}  # cambios sin commit
         self.captchas = set()
         self.attempts = []  # (clave, instante)
+        self.roles = {}  # id → {"nombre", "descripcion"}
+        self.asignaciones = set()  # (usuario, rol_id)
+        self.next_role_id = 1
 
     @staticmethod
     def user(password, email=None, es_admin=False):
@@ -67,7 +70,8 @@ class FakeDB:
 
     def install(self, monkeypatch):
         for name in ("find_user", "get_es_admin", "save_pending_password", "promote_pending_password",
-                     "discard_pending_password", "mark_captcha_used", "count_reset_attempts", "add_reset_attempt"):
+                     "discard_pending_password", "mark_captcha_used", "count_reset_attempts", "add_reset_attempt",
+                     "list_roles", "create_role", "update_role", "delete_role", "role_users"):
             monkeypatch.setattr(db, name, getattr(self, name))
         return FakeConn(self)
 
@@ -105,3 +109,51 @@ class FakeDB:
 
     def add_reset_attempt(self, conn, keys):
         self.attempts += [(k, time.time()) for k in keys]
+
+    # --- roles: mismas reglas que la bbdd real (nombre único, no borrar un rol con usuarios) ---
+
+    def add_role(self, nombre, descripcion=None, usuarios=()):
+        """Atajo de los tests: crea un rol ya asignado a `usuarios` y devuelve su id."""
+        rol_id = self.create_role(None, nombre, descripcion)["id"]
+        self.asignaciones |= {(u, rol_id) for u in usuarios}
+        return rol_id
+
+    def _rol(self, rol_id):
+        r = self.roles[rol_id]
+        n = sum(1 for _, rid in self.asignaciones if rid == rol_id)
+        return {"id": rol_id, "nombre": r["nombre"], "descripcion": r["descripcion"], "num_usuarios": n}
+
+    def _check_nombre(self, nombre, rol_id=None):
+        if any(r["nombre"] == nombre and rid != rol_id for rid, r in self.roles.items()):
+            raise db.NombreDuplicado
+
+    def list_roles(self, conn):
+        return sorted((self._rol(rid) for rid in self.roles), key=lambda r: r["nombre"])
+
+    def create_role(self, conn, nombre, descripcion):
+        self._check_nombre(nombre)
+        rol_id, self.next_role_id = self.next_role_id, self.next_role_id + 1
+        self.roles[rol_id] = {"nombre": nombre, "descripcion": descripcion}
+        return self._rol(rol_id)
+
+    def update_role(self, conn, rol_id, nombre, descripcion):
+        if rol_id not in self.roles:
+            return None
+        self._check_nombre(nombre, rol_id)
+        self.roles[rol_id] = {"nombre": nombre, "descripcion": descripcion}
+        return self._rol(rol_id)
+
+    def delete_role(self, conn, rol_id):
+        if rol_id not in self.roles:
+            return None
+        n = self._rol(rol_id)["num_usuarios"]
+        if n == 0:
+            del self.roles[rol_id]
+        return n
+
+    def role_users(self, conn, rol_id):
+        if rol_id not in self.roles:
+            return None
+        ids = {u: i for i, u in enumerate(self.users, 1)}
+        return [{"id": ids[u], "username": u, "email": self.users[u]["email"]}
+                for u in sorted(u for u, rid in self.asignaciones if rid == rol_id)]
