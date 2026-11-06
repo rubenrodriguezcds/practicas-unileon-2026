@@ -46,9 +46,26 @@ def login(c, u="admin", p="secreto", altcha="resolver"):
 def test_login_ok_y_me(client):
     """Un login correcto (con captcha válido) deja la sesión activa y /me devuelve el usuario."""
     r = login(client)
-    assert r.status_code == 200 and r.json() == {"username": "admin"}
+    assert r.status_code == 200 and r.json() == {"username": "admin", "es_admin": True}
     r = client.get("/api/auth/me")
-    assert r.status_code == 200 and r.json() == {"username": "admin"}
+    assert r.status_code == 200 and r.json() == {"username": "admin", "es_admin": True}
+
+
+def test_login_y_me_de_usuario_no_admin(client, fake):
+    """Un usuario normal entra igual, pero con es_admin=False."""
+    fake.users["pepe"] = fake.user("clave")
+    assert login(client, u="pepe", p="clave").json() == {"username": "pepe", "es_admin": False}
+    assert client.get("/api/auth/me").json() == {"username": "pepe", "es_admin": False}
+
+
+def test_me_de_usuario_borrado_cierra_la_sesion(client, fake):
+    """Si el usuario de la sesión ya no existe, /me da 401 y la sesión se borra."""
+    fake.users["pepe"] = fake.user("clave")
+    login(client, u="pepe", p="clave")
+    del fake.users["pepe"]
+    assert client.get("/api/auth/me").status_code == 401
+    fake.users["pepe"] = fake.user("clave")  # aunque vuelva a existir, la sesión ya no vale
+    assert client.get("/api/auth/me").status_code == 401
 
 
 def test_login_contrasena_mala(client):

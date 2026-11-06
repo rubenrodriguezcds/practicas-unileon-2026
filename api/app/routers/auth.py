@@ -7,12 +7,13 @@ Por qué existe: concentra el flujo de login en un solo sitio. Comprueba la cont
 la tabla `usuarios` de Postgres y guarda el nombre de usuario en la cookie de sesión.
 
 Contrato (el frontend depende de él):
-  POST /api/auth/login   {"username","password","altcha"} → 200 {"username"} + cookie
+  POST /api/auth/login   {"username","password","altcha"} → 200 {"username","es_admin"} + cookie
                          400 captcha no válido · 401 «Usuario o contraseña incorrectos» (mismo
                          mensaje si el usuario no existe, para no revelar qué usuarios hay)
                          · 422 campos vacíos · 503 bbdd caída
   POST /api/auth/logout  → 204, borra la sesión
-  GET  /api/auth/me      → 200 {"username"} · 401 si no hay sesión
+  GET  /api/auth/me      → 200 {"username","es_admin"} · 401 si no hay sesión (o su usuario
+                         ya no existe) · 503 bbdd caída
   POST /api/auth/reset   {"username","altcha"} → 202 {"detail": RESET_MSG} siempre (exista o
                          no el usuario, tenga o no email, falle o no el correo) · 400 captcha
                          · 429 demasiados intentos
@@ -43,6 +44,7 @@ from pydantic import BaseModel, Field
 
 from app import captcha, db, mailer
 from app.db import get_conn
+from app.deps import current_user
 from app.security import hash_password, verify_password
 
 logger = logging.getLogger(__name__)
@@ -105,7 +107,7 @@ def login(body: LoginIn, request: Request, conn=Depends(get_conn)):
     else:
         raise HTTPException(401, "Usuario o contraseña incorrectos")
     request.session["username"] = body.username
-    return {"username": body.username}
+    return {"username": body.username, "es_admin": user["es_admin"]}
 
 
 @router.post("/logout", status_code=204)
@@ -116,16 +118,17 @@ def logout(request: Request):
 
 
 @router.get("/me")
-def me(request: Request):
-    """Devuelve el usuario de la sesión actual.
+def me(request: Request, conn=Depends(get_conn)):
+    """Devuelve el usuario de la sesión actual y si es administrador.
+
+    `es_admin` se lee de la bbdd en cada llamada (ver deps.py): el frontend lo usa para enseñar
+    el menú de administración, pero quien protege de verdad es la API.
 
     Raises:
-        HTTPException: 401 si no hay sesión iniciada.
+        HTTPException: 401 si no hay sesión iniciada o su usuario ya no existe.
     """
-    username = request.session.get("username")
-    if not username:
-        raise HTTPException(401, "No autenticado")
-    return {"username": username}
+    username, es_admin = current_user(request, conn)
+    return {"username": username, "es_admin": es_admin}
 
 
 @router.post("/reset", status_code=202)

@@ -54,18 +54,19 @@ class FakeDB:
     """Bbdd en memoria con las mismas funciones que app/db.py (se instala con `install`)."""
 
     def __init__(self):
-        # usuario → {"password_hash", "email", "reset_hash", "reset_expira"}
-        self.users = {"admin": self.user("secreto", "admin@example.com")}
+        # usuario → {"password_hash", "email", "reset_hash", "reset_expira", "es_admin"}
+        self.users = {"admin": self.user("secreto", "admin@example.com", es_admin=True)}
         self.staged = {}  # cambios sin commit
         self.captchas = set()
         self.attempts = []  # (clave, instante)
 
     @staticmethod
-    def user(password, email=None):
-        return {"password_hash": hash_password(password), "email": email, "reset_hash": None, "reset_expira": 0}
+    def user(password, email=None, es_admin=False):
+        return {"password_hash": hash_password(password), "email": email, "reset_hash": None, "reset_expira": 0,
+                "es_admin": es_admin}
 
     def install(self, monkeypatch):
-        for name in ("find_user", "save_pending_password", "promote_pending_password",
+        for name in ("find_user", "get_es_admin", "save_pending_password", "promote_pending_password",
                      "discard_pending_password", "mark_captcha_used", "count_reset_attempts", "add_reset_attempt"):
             monkeypatch.setattr(db, name, getattr(self, name))
         return FakeConn(self)
@@ -75,7 +76,12 @@ class FakeDB:
         if u is None:
             return None
         pending = u["reset_hash"] if u["reset_expira"] > time.time() else None
-        return {"password_hash": u["password_hash"], "email": u["email"], "reset_hash": pending}
+        return {"password_hash": u["password_hash"], "email": u["email"], "reset_hash": pending,
+                "es_admin": u["es_admin"]}
+
+    def get_es_admin(self, conn, username):
+        u = self.users.get(username)
+        return u["es_admin"] if u else None
 
     def save_pending_password(self, conn, username, hashed):
         self.staged[username] = {**self.users[username], "reset_hash": hashed, "reset_expira": time.time() + 3600}
