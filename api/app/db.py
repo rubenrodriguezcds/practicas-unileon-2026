@@ -3,10 +3,11 @@
 Para qué: abre una conexión por petición HTTP y contiene las consultas SQL de la app.
 
 Por qué existe: es el ÚNICO sitio que habla SQL. Los endpoints no saben nada de psycopg ni de
-tablas; solo piden datos con funciones como `find_password_hash`. Si mañana se cambia a un ORM
+tablas; solo piden datos con funciones como `find_user`. Si mañana se cambia a un ORM
 (SQLAlchemy) o se añaden tablas, el cambio queda aquí.
 
-Quién lo usa: routers/auth.py, a través de la dependencia de FastAPI `Depends(get_conn)`.
+Quién lo usa: routers/auth.py (a través de la dependencia de FastAPI `Depends(get_conn)`),
+captcha.py y migrations.py (que usa `connect` al arrancar).
 
 Notas:
   - Si Postgres no responde, se devuelve 503 «Base de datos no disponible» (y se deja en el log)
@@ -20,9 +21,17 @@ import logging
 import psycopg
 from fastapi import HTTPException
 
-from app.config import get_settings
+from app.config import Settings, get_settings
 
 logger = logging.getLogger(__name__)
+
+
+def connect(s: Settings, **kwargs):
+    """Abre una conexión con los datos de `s` (kwargs extra, p. ej. autocommit, van a psycopg)."""
+    return psycopg.connect(
+        host=s.db_host, port=s.db_port, dbname=s.postgres_db,
+        user=s.postgres_user, password=s.postgres_password, connect_timeout=3, **kwargs,
+    )
 
 
 def get_conn():
@@ -35,27 +44,89 @@ def get_conn():
         HTTPException: 503 si no se puede conectar o si la bbdd cae durante
             la petición (sin filtrar detalles internos al cliente).
     """
-    s = get_settings()
     try:
-        conn = psycopg.connect(
-            host=s.db_host, port=s.db_port, dbname=s.postgres_db,
-            user=s.postgres_user, password=s.postgres_password, connect_timeout=3,
-        )
+        conn = connect(get_settings())
     except psycopg.OperationalError:
         logger.exception("No se pudo conectar a la base de datos")
-        raise HTTPException(503, "Base de datos no disponible")
+        raise HTTPException(503, "Base de datos no disponible") from None
     try:
         yield conn
     except psycopg.OperationalError:  # la bbdd cae a mitad de petición
         logger.exception("Base de datos caída durante la petición")
-        raise HTTPException(503, "Base de datos no disponible")
+        raise HTTPException(503, "Base de datos no disponible") from None
     finally:
         conn.close()
 
 
-def find_password_hash(conn, username: str) -> str | None:
-    """Devuelve el hash de contraseña del usuario, o None si no existe."""
+def find_user(conn, username: str) -> dict | None:
+    """Datos del usuario para login y reseteo, o None si no existe.
+
+    `reset_hash` solo se devuelve si la contraseña pendiente no ha caducado: así el login no
+    tiene que comprobar fechas.
+    """
     row = conn.execute(
-        "SELECT password_hash FROM usuarios WHERE username = %s", (username,)
+        "SELECT password_hash, email, CASE WHEN reset_expira > now() THEN reset_hash END"
+        " FROM usuarios WHERE username = %s",
+        (username,),
     ).fetchone()
-    return row[0] if row else None
+    return {"password_hash": row[0], "email": row[1], "reset_hash": row[2]} if row else None
+
+
+def save_pending_password(conn, username: str, hashed: str) -> None:
+    """Guarda la contraseña del reseteo como pendiente durante 1 hora. NO hace commit.
+
+    Sin commit a propósito: el reseteo solo confirma si el correo se ha enviado (si no, rollback).
+    """
+    conn.execute(
+        "UPDATE usuarios SET reset_hash = %s, reset_expira = now() + interval '1 hour' WHERE username = %s",
+        (hashed, username),
+    )
+
+
+def promote_pending_password(conn, username: str) -> None:
+    """La contraseña pendiente pasa a ser la del usuario (se ha entrado con ella)."""
+    conn.execute(
+        "UPDATE usuarios SET password_hash = reset_hash, reset_hash = NULL, reset_expira = NULL"
+        " WHERE username = %s AND reset_hash IS NOT NULL",
+        (username,),
+    )
+    conn.commit()
+
+
+def discard_pending_password(conn, username: str) -> None:
+    """Descarta la contraseña pendiente (se ha entrado con la de siempre)."""
+    conn.execute("UPDATE usuarios SET reset_hash = NULL, reset_expira = NULL WHERE username = %s", (username,))
+    conn.commit()
+
+
+def mark_captcha_used(conn, signature: str, expires_at: int) -> bool:
+    """Apunta un reto de captcha como usado. Devuelve False si ya lo estaba (reenvío).
+
+    De paso borra los retos caducados: ya no se pueden reutilizar porque la firma caduca sola.
+    """
+    conn.execute("DELETE FROM captchas_usados WHERE expira < now()")
+    inserted = conn.execute(
+        "INSERT INTO captchas_usados (firma, expira) VALUES (%s, to_timestamp(%s))"
+        " ON CONFLICT (firma) DO NOTHING RETURNING firma",
+        (signature, expires_at),
+    ).fetchone()
+    conn.commit()
+    return inserted is not None
+
+
+def count_reset_attempts(conn, keys: list[str]) -> int:
+    """Máximo de intentos de reseteo en la última hora entre las claves dadas (usuario, IP)."""
+    row = conn.execute(
+        "SELECT coalesce(max(n), 0) FROM (SELECT count(*) AS n FROM intentos_reset"
+        " WHERE clave = ANY(%s) AND creado_en > now() - interval '1 hour' GROUP BY clave) t",
+        (keys,),
+    ).fetchone()
+    return row[0]
+
+
+def add_reset_attempt(conn, keys: list[str]) -> None:
+    """Apunta un intento de reseteo para cada clave y borra los de hace más de un día."""
+    conn.execute("DELETE FROM intentos_reset WHERE creado_en < now() - interval '1 day'")
+    for key in keys:
+        conn.execute("INSERT INTO intentos_reset (clave) VALUES (%s)", (key,))
+    conn.commit()
