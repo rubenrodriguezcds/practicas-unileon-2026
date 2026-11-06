@@ -21,6 +21,8 @@
 > [!NOTE]
 > **Primera entrega:** el entorno en dos contenedores Docker con una aplicación web mínima
 > (login y home con logout) cuyo usuario vive en la base de datos.
+>
+> **Issue #4:** logo en el login, recuperación de contraseña por correo y captcha anti-bot.
 
 ## Arquitectura
 
@@ -88,8 +90,14 @@ docker compose ps             # db (healthy) y web (Up)
 | `SSH_USER`, `SSH_PASSWORD` | Usuario para entrar por SSH al contenedor `db` |
 | `APP_ADMIN_PASSWORD` | Contraseña del usuario `admin` de la aplicación web. Se crea al inicializar la bbdd: para cambiarla después hay que recrearla (`docker compose down -v`) |
 | `APP_SECRET` | Firma de la cookie de sesión. **Mínimo 32 caracteres** o la web no arranca |
+| `APP_ADMIN_EMAIL` | Email del `admin`, a donde llega su contraseña nueva si la resetea. La API se lo pone al arrancar si aún no tiene |
+| `ALTCHA_HMAC_KEY` | Clave con la que la API firma los retos del captcha. **Mínimo 32 caracteres** o la web no arranca |
+| `ALTCHA_ENABLED` | `false` desactiva el captcha (solo tests o desarrollo; la API lo avisa en el log). Por defecto `true` |
+| `RESET_MAX_POR_HORA` | Reseteos de contraseña permitidos por hora, por usuario y por IP. Por defecto `5` |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | Servidor de correo para el reseteo. **Vacío = modo log** (ver aviso abajo) |
+| `SMTP_TLS` | `starttls` (puerto 587, Brevo y Gmail; por defecto), `ssl` (465) o `none` |
 
-Para generar un `APP_SECRET`:
+Para generar un `APP_SECRET` o un `ALTCHA_HMAC_KEY`:
 
 ```bash
 python -c "import secrets;print(secrets.token_hex(32))"
@@ -98,11 +106,25 @@ python -c "import secrets;print(secrets.token_hex(32))"
 > [!CAUTION]
 > El `.env` contiene secretos y **no se sube nunca** al repositorio (está en `.gitignore`).
 
+> [!WARNING]
+> **Modo log del correo, solo para desarrollo.** Con `SMTP_HOST` vacío los correos no se
+> envían: se escriben en `docker compose logs web` **con la contraseña nueva en claro**. En
+> cualquier entorno compartido hay que configurar un servidor SMTP. El proyecto usa
+> [Brevo](https://www.brevo.com) (gratis, sin dominio propio): `SMTP_HOST=smtp-relay.brevo.com`,
+> `SMTP_PORT=587`, `SMTP_TLS=starttls`, el login y la clave SMTP de Brevo en `SMTP_USER` y
+> `SMTP_PASSWORD`, y en `SMTP_FROM` el remitente verificado en Brevo. Gmail con contraseña de
+> aplicación también funciona; Outlook.com personal no (Microsoft exige OAuth2).
+
+> [!NOTE]
+> El captcha ([ALTCHA](https://altcha.org)) es open source y lo sirve la propia API: **no
+> necesita ninguna cuenta externa** (ni Google ni Cloudflare), solo la clave `ALTCHA_HMAC_KEY`.
+
 ## Uso
 
 | Qué | Cómo |
 |---|---|
 | Aplicación web | http://localhost/login |
+| Recuperar contraseña | http://localhost/reset-password (o «¿Olvidaste tu contraseña?» en el login) |
 | Estado de la API | http://localhost/api/health |
 | Documentación de la API | http://localhost/api/docs |
 | Consultar la bbdd | `docker compose exec db psql -U gestor -d gestor` (ya incluido), o cualquier cliente de PostgreSQL (DBeaver, pgAdmin…) con host `localhost` y puerto `1521` |
@@ -115,7 +137,9 @@ python -c "import secrets;print(secrets.token_hex(32))"
 
 | Método | Ruta | Respuesta |
 |---|---|---|
-| ![POST](https://img.shields.io/badge/POST-49cc90?style=flat-square) | `/api/auth/login` `{"username","password"}` | 200 `{"username"}` + cookie de sesión · 401 si las credenciales no son válidas |
+| ![POST](https://img.shields.io/badge/POST-49cc90?style=flat-square) | `/api/auth/login` `{"username","password","altcha"}` | 200 `{"username"}` + cookie de sesión · 400 captcha no válido · 401 si las credenciales no son válidas |
+| ![POST](https://img.shields.io/badge/POST-49cc90?style=flat-square) | `/api/auth/reset` `{"username","altcha"}` | 202 siempre con el mismo mensaje · 400 captcha no válido · 429 demasiados intentos |
+| ![GET](https://img.shields.io/badge/GET-61affe?style=flat-square) | `/api/captcha` | 200 reto del captcha (caduca en 5 minutos) |
 | ![POST](https://img.shields.io/badge/POST-49cc90?style=flat-square) | `/api/auth/logout` | 204 |
 | ![GET](https://img.shields.io/badge/GET-61affe?style=flat-square) | `/api/auth/me` | 200 `{"username"}` · 401 sin sesión |
 | ![GET](https://img.shields.io/badge/GET-61affe?style=flat-square) | `/api/health` | 200 `{"status":"ok"}` |
@@ -138,8 +162,12 @@ sequenceDiagram
     F->>A: GET /api/auth/me
     A-->>F: 401 (sin sesión)
     F-->>U: Pantalla de login
-    U->>F: admin + contraseña
-    F->>A: POST /api/auth/login
+    U->>F: admin + contraseña + «No soy un robot»
+    F->>A: GET /api/captcha
+    A-->>F: reto firmado
+    F->>F: resuelve el reto (~1 s)
+    F->>A: POST /api/auth/login (con la solución)
+    A->>D: apunta el reto como usado
     A->>D: SELECT password_hash FROM usuarios
     D-->>A: hash bcrypt
     A->>A: verifica la contraseña
@@ -149,11 +177,36 @@ sequenceDiagram
 
 </details>
 
+<details>
+<summary><b>Recuperar la contraseña: cómo funciona y por qué así</b></summary>
+
+1. El usuario escribe su nombre, resuelve el captcha y pulsa «Enviar contraseña nueva».
+2. La API genera una contraseña aleatoria, la guarda con hash bcrypt como **pendiente** (vale
+   1 hora) y la envía al email del usuario. Solo si el correo sale, se confirma en la bbdd.
+3. La contraseña de siempre **sigue funcionando**. Al entrar con la nueva, la nueva pasa a ser
+   la contraseña y la vieja deja de valer. Si entra con la vieja, la pendiente se descarta.
+
+Por qué así:
+
+- **Nadie puede dejar sin acceso a otro.** Si la contraseña cambiara al pedir el reseteo,
+  bastaría saber un nombre de usuario para bloquearlo. Así, un reseteo que no pidió el dueño
+  solo le genera un correo que puede ignorar.
+- **No revela qué usuarios existen.** La respuesta es siempre la misma (exista o no el usuario,
+  tenga o no email, falle o no el correo). Los fallos de correo quedan en el log del servidor.
+- **Límite de intentos** por usuario y por IP (`RESET_MAX_POR_HORA`). Al superarlo responde 429.
+- **Captcha** en el login y en el reseteo. Cada reto caduca a los 5 minutos y vale una sola vez.
+
+</details>
+
 ## Cómo funciona por dentro
 
 - **Creación del modelo de datos**: los scripts de `db/init/` se ejecutan automáticamente
   la primera vez que arranca el contenedor (con el volumen vacío). Además son idempotentes
   (`CREATE TABLE IF NOT EXISTS`, `ON CONFLICT DO NOTHING`), así que relanzarlos no rompe nada.
+- **Migraciones**: los scripts de `db/init/` solo crean la bbdd desde cero. Para cambiar el
+  esquema de una bbdd que ya tiene datos (añadir una columna, una tabla…) se añade un fichero
+  `api/migrations/NNN_nombre.sql`. La API aplica al arrancar los que falten, en orden, y los
+  apunta en la tabla `migraciones_aplicadas`. Así nadie tiene que borrar la bbdd para actualizar.
 - **Datos persistentes** en el volumen `pgdata`: sobreviven a `docker compose down`.
 - **Orden de arranque**: `web` espera a que `db` pase su *healthcheck* (`pg_isready`).
 - **Contraseñas** guardadas con hash bcrypt; nunca en claro.
@@ -174,15 +227,21 @@ db/                       Contenedor de base de datos
   init/02_seed.sh         Usuario admin de la web (contraseña del .env)
 api/                      Backend FastAPI
   app/config.py           Configuración desde variables de entorno
-  app/db.py               Conexión a Postgres
+  app/db.py               Conexión a Postgres y consultas
+  app/migrations.py       Aplica las migraciones pendientes al arrancar
   app/security.py         Hash y verificación de contraseñas
-  app/routers/auth.py     Login, logout y sesión
+  app/captcha.py          Retos y verificación del captcha ALTCHA
+  app/mailer.py           Envío de correo (SMTP o log)
+  app/routers/auth.py     Login, logout, sesión y reseteo de contraseña
+  app/routers/captcha.py  Entrega retos del captcha
   app/spa.py              Sirve el frontend compilado
   app/main.py             Monta la aplicación
+  migrations/             Cambios de esquema (NNN_nombre.sql)
   tests/
 frontend/                 Frontend React + Vite + TypeScript
   src/api/client.ts       Único punto de llamada a la API
-  src/pages/              Login y Home
+  src/pages/              Login, ResetPassword y Home
+  src/components/         Captcha y Logo
   src/App.tsx             Rutas y control de sesión
 docker/web.Dockerfile     Imagen del contenedor web
 ```
@@ -205,6 +264,7 @@ python -m venv .venv
 .venv/Scripts/activate        # Windows  (Linux/Mac: source .venv/bin/activate)
 pip install -r requirements-dev.txt
 pytest -q
+ruff check .                  # linter
 ```
 
 Para levantar la API en local: `uvicorn app.main:app --port 8000` dentro de `api/` (con las
@@ -219,6 +279,7 @@ variables de `.env` cargadas y una bbdd accesible).
 cd frontend
 npm ci
 npm test
+npm run lint
 npm run dev                   # http://localhost:5173, redirige /api a localhost:8000
 ```
 
@@ -268,6 +329,8 @@ Mira el motivo con `docker compose logs web --tail 30` y `docker compose logs db
 - **`app_secret` … `at least 32 characters`**: el `APP_SECRET` del `.env` es demasiado corto.
   El de `.env.example` (`cambia-esto`) lo es a propósito, para que nadie use un secreto
   conocido. Genera uno con `python -c "import secrets;print(secrets.token_hex(32))"`.
+- **`ALTCHA_HMAC_KEY debe tener al menos 32 caracteres`**: falta la clave del captcha en el
+  `.env` (pasa al actualizar desde una versión anterior). Genérala igual que `APP_SECRET`.
 - **`Falta APP_ADMIN_PASSWORD en el .env`** (en el log de `db`): sin esa variable la bbdd no
   arranca, y `web` espera a que `db` esté sana. Añádela y haz `docker compose down -v` y `up`.
 - **`port is already allocated`**: otra cosa usa el puerto 80 (ver «El puerto 80 o el 22 ya está en uso»).
@@ -277,7 +340,18 @@ Mira el motivo con `docker compose logs web --tail 30` y `docker compose logs db
 <details>
 <summary><b>Cambié <code>APP_ADMIN_PASSWORD</code> o los scripts de <code>db/init/</code> y no se aplican</b></summary>
 
-Solo se ejecutan con el volumen vacío; usa `docker compose down -v` (borra los datos).
+Solo se ejecutan con el volumen vacío; usa `docker compose down -v` (borra los datos). Para
+cambiar el esquema sin borrar datos, añade una migración en `api/migrations/`.
+
+</details>
+
+<details>
+<summary><b>He pedido una contraseña nueva y no me llega el correo</b></summary>
+
+- Sin `SMTP_HOST` en el `.env` no se envía nada: el correo está en `docker compose logs web`.
+- Con SMTP configurado, si el envío falla el error aparece en `docker compose logs web` y la
+  contraseña no cambia (a propósito, la página muestra el mismo mensaje que si hubiera ido bien).
+- El usuario necesita un email en la bbdd: el `admin` lo toma de `APP_ADMIN_EMAIL`.
 
 </details>
 
