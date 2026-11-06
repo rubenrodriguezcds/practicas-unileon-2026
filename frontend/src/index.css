@@ -1,8 +1,8 @@
 /*
   Estilos globales de la aplicación.
 
-  Para qué: aspecto de las dos pantallas (tarjeta centrada, formulario, botones y mensajes de
-  error). CSS propio y mínimo, sin librería de componentes (decisión del equipo para esta
+  Para qué: aspecto de las pantallas (tarjeta centrada, logo, formulario, botones, enlaces y
+  mensajes de error o de éxito). CSS propio y mínimo, sin librería de componentes (decisión del equipo para esta
   primera entrega); si la app crece, se puede añadir una librería sin tocar la lógica.
 */
 :root { font-family: system-ui, sans-serif; color: #1f2937; background: #f3f4f6; }
@@ -18,3 +18,11 @@ button:hover:not(:disabled) { background: #1d4ed8; }
 button:disabled { background: #9ca3af; cursor: not-allowed; }
 :focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
 .error { margin: 0; color: #b91c1c; font-size: 0.9rem; }
+.ok { margin: 0; color: #047857; font-size: 0.9rem; }
+.hint { margin: -0.5rem 0 0; color: #4b5563; font-size: 0.9rem; }
+.link { align-self: center; color: #2563eb; font-size: 0.9rem; }
+/* Logo fijo arriba a la izquierda (solo en login y reseteo, ver components/Logo.tsx). */
+.brand { position: fixed; top: 1.25rem; left: 1.5rem; }
+.brand img { display: block; height: 2.75rem; }
+/* El widget del captcha ocupa todo el ancho del formulario, como los campos. */
+altcha-widget { --altcha-max-width: 100%; }
