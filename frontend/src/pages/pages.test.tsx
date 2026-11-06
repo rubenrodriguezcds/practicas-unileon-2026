@@ -1,11 +1,12 @@
 /**
- * Tests de las pantallas (Login, ResetPassword, Home) y del guardia de sesión de App.
+ * Tests de las pantallas (Login, ResetPassword, Home), del menú (Layout) y del guardia de sesión de App.
  *
  * Para qué: comprobar lo que ve el usuario: error bajo el botón al fallar el login, botón
  * desactivado con campos vacíos o sin captcha, el captcha se envía y se reinicia tras un fallo,
  * el logo solo en las pantallas sin sesión, el enlace al reseteo, saludo y cierre de sesión en
- * orden (primero el servidor, luego la pantalla), y que los errores de la bbdd se muestran y no
- * se arrastran tras un login correcto.
+ * orden (primero el servidor, luego la pantalla), que los errores de la bbdd se muestran y no
+ * se arrastran tras un login correcto, y que la entrada «Roles» y la ruta /roles son solo para
+ * el administrador.
  *
  * El cliente de API se simula (vi.mock), así que no hace falta backend. El captcha real (un web
  * component que pide retos a la API) se sustituye por un botón «Resolver captcha» que entrega
@@ -18,7 +19,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import App from '../App'
-import { ApiError, login, logout, me, resetPassword } from '../api/client'
+import { ApiError, listRoles, login, logout, me, resetPassword } from '../api/client'
+import Layout from '../components/Layout'
 import Home from './Home'
 import Login from './Login'
 import ResetPassword from './ResetPassword'
@@ -29,6 +31,7 @@ vi.mock('../api/client', async (orig) => ({
   logout: vi.fn(),
   me: vi.fn(),
   resetPassword: vi.fn(),
+  listRoles: vi.fn(),
 }))
 
 // Cada montaje del captcha falso = un reto nuevo (captcha-1, captcha-2…).
@@ -47,6 +50,9 @@ beforeEach(() => {
   vi.clearAllMocks()
   mounts = 0
 })
+
+const ADMIN = { username: 'admin', es_admin: true }
+const PEPE = { username: 'pepe', es_admin: false }
 
 const inRouter = (ui: ReactNode, path = '/') => render(<MemoryRouter initialEntries={[path]}>{ui}</MemoryRouter>)
 
@@ -79,17 +85,17 @@ describe('Login', () => {
   })
 
   it('envía el captcha con el login', async () => {
-    vi.mocked(login).mockResolvedValue({ username: 'admin' })
+    vi.mocked(login).mockResolvedValue(ADMIN)
     const onLogin = vi.fn()
     inRouter(<Login onLogin={onLogin} />)
     await fillLogin('admin', 'secreto')
     expect(login).toHaveBeenCalledWith('admin', 'secreto', 'captcha-1')
-    expect(onLogin).toHaveBeenCalledWith('admin')
+    expect(onLogin).toHaveBeenCalledWith(ADMIN)
   })
 
   it('tras un fallo pide un reto nuevo y obliga a resolverlo otra vez', async () => {
     vi.mocked(login).mockRejectedValueOnce(new ApiError(401, 'Usuario o contraseña incorrectos'))
-    vi.mocked(login).mockResolvedValueOnce({ username: 'admin' })
+    vi.mocked(login).mockResolvedValueOnce(ADMIN)
     inRouter(<Login onLogin={vi.fn()} />)
     await fillLogin('admin', 'mala')
     await screen.findByRole('alert')
@@ -133,11 +139,17 @@ describe('ResetPassword', () => {
 })
 
 describe('Home', () => {
-  it('saluda y cierra sesión', async () => {
+  it('saluda al usuario', () => {
+    render(<Home username="admin" />)
+    expect(screen.getByText('Hola, admin')).toBeInTheDocument()
+  })
+})
+
+describe('Layout (menú)', () => {
+  it('cierra sesión: primero el servidor, luego la pantalla', async () => {
     vi.mocked(logout).mockResolvedValue()
     const onLogout = vi.fn()
-    render(<Home username="admin" onLogout={onLogout} />)
-    expect(screen.getByText('Hola, admin')).toBeInTheDocument()
+    inRouter(<Layout user={ADMIN} onLogout={onLogout} />)
     await userEvent.click(screen.getByRole('button', { name: 'Cerrar sesión' }))
     expect(logout).toHaveBeenCalled()
     expect(onLogout).toHaveBeenCalled()
@@ -147,10 +159,22 @@ describe('Home', () => {
   it('muestra el error si logout falla y no llama a onLogout', async () => {
     vi.mocked(logout).mockRejectedValue(new ApiError(503, 'Base de datos no disponible'))
     const onLogout = vi.fn()
-    render(<Home username="admin" onLogout={onLogout} />)
+    inRouter(<Layout user={ADMIN} onLogout={onLogout} />)
     await userEvent.click(screen.getByRole('button', { name: 'Cerrar sesión' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Base de datos no disponible')
     expect(onLogout).not.toHaveBeenCalled()
+  })
+
+  it('el administrador ve la entrada «Roles»', () => {
+    inRouter(<Layout user={ADMIN} onLogout={vi.fn()} />)
+    expect(screen.getByRole('link', { name: 'Roles' })).toHaveAttribute('href', '/roles')
+    expect(screen.getByText('admin')).toBeInTheDocument()
+  })
+
+  it('un usuario normal no ve la entrada «Roles»', () => {
+    inRouter(<Layout user={PEPE} onLogout={vi.fn()} />)
+    expect(screen.getByRole('link', { name: 'Inicio' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Roles' })).not.toBeInTheDocument()
   })
 })
 
@@ -164,7 +188,7 @@ describe('App', () => {
 
   it('no arrastra el error de me() tras login y logout', async () => {
     vi.mocked(me).mockRejectedValue(new ApiError(503, 'Base de datos no disponible'))
-    vi.mocked(login).mockResolvedValue({ username: 'admin' })
+    vi.mocked(login).mockResolvedValue(ADMIN)
     vi.mocked(logout).mockResolvedValue()
     inRouter(<App />)
     await screen.findByRole('alert')
@@ -184,15 +208,36 @@ describe('App', () => {
   })
 
   it('el logo no aparece en la home (solo en login y reseteo)', async () => {
-    vi.mocked(me).mockResolvedValue({ username: 'admin' })
+    vi.mocked(me).mockResolvedValue(ADMIN)
     inRouter(<App />)
     await screen.findByText('Hola, admin')
     expect(screen.queryByRole('img', { name: 'CDS' })).not.toBeInTheDocument()
   })
 
   it('con sesión, /reset-password redirige a la home', async () => {
-    vi.mocked(me).mockResolvedValue({ username: 'admin' })
+    vi.mocked(me).mockResolvedValue(ADMIN)
     inRouter(<App />, '/reset-password')
     expect(await screen.findByText('Hola, admin')).toBeInTheDocument()
+  })
+
+  it('el administrador llega a /roles desde el menú', async () => {
+    vi.mocked(me).mockResolvedValue(ADMIN)
+    vi.mocked(listRoles).mockResolvedValue([])
+    inRouter(<App />)
+    await userEvent.click(await screen.findByRole('link', { name: 'Roles' }))
+    expect(await screen.findByRole('heading', { name: 'Roles' })).toBeInTheDocument()
+  })
+
+  it('un usuario normal que escribe /roles a mano vuelve a la home', async () => {
+    vi.mocked(me).mockResolvedValue(PEPE)
+    inRouter(<App />, '/roles')
+    expect(await screen.findByText('Hola, pepe')).toBeInTheDocument()
+    expect(listRoles).not.toHaveBeenCalled()
+  })
+
+  it('sin sesión, /roles lleva al login', async () => {
+    vi.mocked(me).mockResolvedValue(null)
+    inRouter(<App />, '/roles')
+    expect(await screen.findByRole('heading', { name: 'Iniciar sesión' })).toBeInTheDocument()
   })
 })
