@@ -8,15 +8,17 @@ valor peligroso, la API se niega a arrancar con un error claro en vez de fallar 
 mitad de una petición. Ejemplo: `APP_SECRET` exige ≥ 32 caracteres, porque quien conozca
 el secreto podría fabricar cookies de sesión de cualquier usuario.
 
-Quién lo usa: main.py (al crear la app) y db.py (datos de conexión).
+Quién lo usa: main.py (al crear la app), db.py (datos de conexión), captcha.py, mailer.py,
+migrations.py y routers/auth.py.
 
 Notas: los nombres de los campos coinciden con las variables sin distinguir mayúsculas
 (`postgres_db` ← `POSTGRES_DB`). Las variables que no aparecen aquí (SSH_*, etc.) se ignoran.
 """
 
 from functools import lru_cache
+from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -37,6 +39,33 @@ class Settings(BaseSettings):
     db_port: int = 5432
     app_secret: str = Field(min_length=32)
     static_dir: str | None = None
+
+    # Email del admin: las migraciones se lo ponen al arrancar si aún no tiene (reseteo de contraseña).
+    app_admin_email: str | None = None
+
+    # Correo (app/mailer.py). Sin SMTP_HOST, el correo se escribe en el log: solo para desarrollo.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = "no-reply@localhost"
+    smtp_tls: Literal["starttls", "ssl", "none"] = "starttls"
+    smtp_timeout: float = 10
+
+    # Captcha ALTCHA (app/captcha.py). La clave firma los retos: quien la conozca podría fabricarlos.
+    altcha_enabled: bool = True
+    altcha_hmac_key: str = ""
+    altcha_cost: int = 5000  # iteraciones PBKDF2 por intento: ~1 s en el navegador
+
+    # Reseteos permitidos por hora, por usuario y por IP (más → 429).
+    reset_max_por_hora: int = Field(default=5, ge=1)
+
+    @model_validator(mode="after")
+    def _clave_altcha(self):
+        """Con el captcha activo, exige ALTCHA_HMAC_KEY de ≥ 32 caracteres (como APP_SECRET)."""
+        if self.altcha_enabled and len(self.altcha_hmac_key) < 32:
+            raise ValueError("ALTCHA_HMAC_KEY debe tener al menos 32 caracteres (o ALTCHA_ENABLED=false)")
+        return self
 
 
 @lru_cache

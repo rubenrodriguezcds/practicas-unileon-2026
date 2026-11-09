@@ -1,7 +1,7 @@
 /**
  * Cliente de la API: el ÚNICO fichero del frontend que hace peticiones al backend.
  *
- * Para qué: ofrece funciones simples (login, logout, me) que las pantallas llaman sin saber nada
+ * Para qué: ofrece funciones simples (login, logout, me, resetPassword) que las pantallas llaman sin saber nada
  * de fetch, URLs ni códigos HTTP. Los errores llegan como ApiError con el mensaje del backend,
  * listo para enseñarlo al usuario.
  *
@@ -44,14 +44,16 @@ async function request(path: string, init?: RequestInit): Promise<Response> {
 }
 
 /**
- * Inicia sesión con usuario y contraseña (POST /api/auth/login).
+ * Inicia sesión con usuario, contraseña y captcha (POST /api/auth/login).
+ * @param altcha payload del captcha resuelto (componente Captcha).
  * @returns el usuario autenticado.
- * @throws {ApiError} p. ej. 401 con "Usuario o contraseña incorrectos"; la pantalla Login muestra el mensaje.
+ * @throws {ApiError} p. ej. 401 con "Usuario o contraseña incorrectos" o 400 con el captcha no
+ *   válido; la pantalla Login muestra el mensaje.
  */
-export async function login(username: string, password: string): Promise<{ username: string }> {
+export async function login(username: string, password: string, altcha: string): Promise<{ username: string }> {
   const res = await request('/api/auth/login', {
     method: 'POST',
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ username, password, altcha }),
   })
   return res.json()
 }
@@ -76,4 +78,17 @@ export async function me(): Promise<{ username: string } | null> {
     if (e instanceof ApiError && e.status === 401) return null
     throw e
   }
+}
+
+/**
+ * Pide una contraseña nueva por correo (POST /api/auth/reset).
+ * @returns el mensaje de la API, el mismo exista o no el usuario.
+ * @throws {ApiError} 400 captcha no válido, 429 demasiados intentos; ResetPassword muestra el mensaje.
+ */
+export async function resetPassword(username: string, altcha: string): Promise<{ detail: string }> {
+  const res = await request('/api/auth/reset', {
+    method: 'POST',
+    body: JSON.stringify({ username, altcha }),
+  })
+  return res.json()
 }

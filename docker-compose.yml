@@ -3,7 +3,7 @@ services:
     build: ./db
     env_file: .env
     ports:
-      - "1521:5432"   # 1521 lo pide el profe; dentro Postgres sigue en su 5432
+      - "1521:5432"   # 1521 lo exige el enunciado; dentro Postgres sigue en su 5432
       - "22:22"
     volumes:
       - pgdata:/var/lib/postgresql/data

@@ -30,6 +30,7 @@ WORKDIR /app
 COPY api/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 COPY api/app ./app
+COPY api/migrations ./migrations
 COPY --from=frontend /frontend/dist ./static
 # STATIC_DIR activa que la API sirva el frontend; sin ella, la API funciona sola (útil al separar en 3 contenedores).
 ENV STATIC_DIR=/app/static PYTHONUNBUFFERED=1

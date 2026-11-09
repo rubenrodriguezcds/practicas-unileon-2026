@@ -10,14 +10,13 @@ Cómo: crea una carpeta temporal que imita el `dist/` de Vite; no hace falta com
 import pytest
 from fastapi.testclient import TestClient
 
-from app.config import Settings
 from app.main import create_app
+from tests.factories import make_settings
 
 
 def make(static_dir):
     """Crea un cliente con la app configurada con ese static_dir (o None)."""
-    return TestClient(create_app(Settings(
-        postgres_db="t", postgres_user="t", postgres_password="t", app_secret="0123456789abcdef0123456789abcdef0123456789abcdef", static_dir=static_dir)))
+    return TestClient(create_app(make_settings(static_dir=static_dir)))
 
 
 @pytest.fixture

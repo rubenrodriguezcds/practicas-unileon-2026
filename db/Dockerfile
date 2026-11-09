@@ -11,7 +11,7 @@
 # Puertos: dentro, 5432 (Postgres) y 22 (SSH); el compose los publica como 1521 y 22.
 FROM postgres:16
 
-# SSH en el mismo contenedor (lo pide el profe); la imagen oficial no lo trae.
+# SSH en el mismo contenedor (lo exige el enunciado); la imagen oficial no lo trae.
 # Se borran las claves de host del build para que cada contenedor genere las suyas al arrancar.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends openssh-server \

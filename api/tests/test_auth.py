@@ -2,10 +2,11 @@
 
 Para qué: fijar el contrato que usa el frontend (códigos, mensajes y cookie) y los casos
 delicados: mismo 401 para usuario inexistente y contraseña mala, hash corrupto → 401, cookie
-HttpOnly sin Secure, y bbdd caída → 503.
+HttpOnly sin Secure, bbdd caída → 503 y captcha obligatorio, caducado o reutilizado → 400.
 
-Cómo: la conexión a Postgres y la consulta del hash se sustituyen por dobles (dependency
-overrides y monkeypatch), así que se ejecutan en milisegundos y sin Docker.
+Cómo: la conexión a Postgres se sustituye por un doble (dependency override) y las consultas
+por la bbdd en memoria de tests/factories.py, así que se ejecutan en milisegundos y sin Docker.
+El captcha se resuelve de verdad con la librería ALTCHA, como haría el navegador.
 """
 
 import pytest
@@ -13,31 +14,37 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app import db
-from app.config import Settings
 from app.main import create_app
-from app.routers import auth
-from app.security import hash_password
+from tests.factories import FakeDB, make_settings, solve_captcha
 
 MSG = "Usuario o contraseña incorrectos"
+CAPTCHA_MSG = "Verificación anti-bot no válida"
 
 
 @pytest.fixture
-def client(monkeypatch):
-    """App con usuario admin/secreto en memoria; sustituye la bbdd por un doble."""
-    users = {"admin": hash_password("secreto")}
-    app = create_app(Settings(postgres_db="t", postgres_user="t", postgres_password="t", app_secret="0123456789abcdef0123456789abcdef0123456789abcdef"))
-    app.dependency_overrides[db.get_conn] = lambda: object()
-    monkeypatch.setattr(auth, "find_password_hash", lambda conn, u: users.get(u))
+def fake(monkeypatch):
+    """Bbdd en memoria con admin/secreto."""
+    return FakeDB()
+
+
+@pytest.fixture
+def client(fake, monkeypatch):
+    """App con la bbdd sustituida por FakeDB."""
+    app = create_app(make_settings())
+    conn = fake.install(monkeypatch)
+    app.dependency_overrides[db.get_conn] = lambda: conn
     return TestClient(app)
 
 
-def login(c, u="admin", p="secreto"):
-    """Atajo para hacer POST /api/auth/login."""
-    return c.post("/api/auth/login", json={"username": u, "password": p})
+def login(c, u="admin", p="secreto", altcha="resolver"):
+    """Atajo para POST /api/auth/login; por defecto con un captcha recién resuelto."""
+    if altcha == "resolver":
+        altcha = solve_captcha(c.app.state.settings)
+    return c.post("/api/auth/login", json={"username": u, "password": p, "altcha": altcha})
 
 
 def test_login_ok_y_me(client):
-    """Un login correcto deja la sesión activa y /me devuelve el usuario."""
+    """Un login correcto (con captcha válido) deja la sesión activa y /me devuelve el usuario."""
     r = login(client)
     assert r.status_code == 200 and r.json() == {"username": "admin"}
     r = client.get("/api/auth/me")
@@ -56,9 +63,9 @@ def test_login_usuario_inexistente(client):
     assert r.status_code == 401 and r.json()["detail"] == MSG
 
 
-def test_login_hash_corrupto_es_401(client, monkeypatch):  # Review Focus 3
+def test_login_hash_corrupto_es_401(client, fake):
     """Un hash corrupto en la bbdd debe dar 401, no 500."""
-    monkeypatch.setattr(auth, "find_password_hash", lambda conn, u: "no-es-bcrypt")
+    fake.users["admin"]["password_hash"] = "no-es-bcrypt"
     assert login(client).status_code == 401
 
 
@@ -80,13 +87,13 @@ def test_me_sin_sesion(client):
     assert client.get("/api/auth/me").status_code == 401
 
 
-def test_cookie_sin_secure(client):  # Review Focus 5
+def test_cookie_sin_secure(client):
     """La cookie es HttpOnly y sin Secure: en HTTP plano un Secure no se guardaría."""
     cookie = login(client).headers["set-cookie"].lower()
     assert "secure" not in cookie and "httponly" in cookie
 
 
-def test_bd_caida(client):  # Review Focus 4
+def test_bd_caida(client):
     """Si la dependencia de bbdd falla, el login responde 503 con mensaje claro."""
     def caida():
         raise HTTPException(503, "Base de datos no disponible")
@@ -102,8 +109,52 @@ def test_get_conn_operational_error_da_503(monkeypatch):
         raise db.psycopg.OperationalError("down")
 
     monkeypatch.setattr(db.psycopg, "connect", boom)
-    monkeypatch.setattr(db, "get_settings", lambda: Settings(
-        postgres_db="t", postgres_user="t", postgres_password="t", app_secret="0123456789abcdef0123456789abcdef0123456789abcdef"))
+    monkeypatch.setattr(db, "get_settings", make_settings)
     with pytest.raises(HTTPException) as e:
         next(db.get_conn())
     assert e.value.status_code == 503 and e.value.detail == "Base de datos no disponible"
+
+
+# --- captcha en el login ---
+
+@pytest.mark.parametrize("altcha", [None, "", "basura", "eyJmb28iOiAxfQ=="])
+def test_login_sin_captcha_valido_es_400(client, altcha):
+    """Sin captcha, o con uno mal formado, el login se rechaza antes de mirar la contraseña."""
+    r = login(client, altcha=altcha)
+    assert r.status_code == 400 and r.json()["detail"] == CAPTCHA_MSG
+
+
+def test_login_captcha_reutilizado_es_400(client):
+    """Un reto ya usado no vale otra vez, aunque el primer intento fallara."""
+    payload = solve_captcha(client.app.state.settings)
+    assert login(client, p="mala", altcha=payload).status_code == 401
+    r = login(client, altcha=payload)
+    assert r.status_code == 400 and r.json()["detail"] == CAPTCHA_MSG
+
+
+def test_login_captcha_caducado_es_400(client):
+    """Un reto caducado se rechaza."""
+    payload = solve_captcha(client.app.state.settings, expires_in=-1)
+    assert login(client, altcha=payload).status_code == 400
+
+
+def test_login_captcha_firmado_con_otra_clave_es_400(client):
+    """Un reto que no ha firmado esta API (otra clave) se rechaza."""
+    payload = solve_captcha(make_settings(altcha_hmac_key="otra-clave-" + "x" * 32))
+    assert login(client, altcha=payload).status_code == 400
+
+
+def test_login_con_captcha_desactivado(fake, monkeypatch):
+    """Con ALTCHA_ENABLED=false el login funciona sin captcha (tests y desarrollo)."""
+    app = create_app(make_settings(altcha_enabled=False, altcha_hmac_key=""))
+    conn = fake.install(monkeypatch)
+    app.dependency_overrides[db.get_conn] = lambda: conn
+    assert login(TestClient(app), altcha=None).status_code == 200
+
+
+def test_get_captcha_entrega_reto_firmado(client):
+    """GET /api/captcha devuelve un reto con firma y caducidad, sin caché."""
+    r = client.get("/api/captcha")
+    body = r.json()
+    assert r.status_code == 200 and r.headers["cache-control"] == "no-store"
+    assert body["signature"] and body["parameters"]["expiresAt"]
