@@ -8,7 +8,7 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, login, me, resetPassword } from './client'
+import { ApiError, createRole, deleteRole, listRoles, login, me, resetPassword, roleUsers, updateRole } from './client'
 
 // Crea un `fetch` simulado que responde con el status y el cuerpo JSON dados.
 const reply = (status: number, body?: unknown) =>
@@ -59,5 +59,64 @@ describe('client', () => {
     const err = await resetPassword('a', 'c').catch((e) => e)
     expect(err).toBeInstanceOf(ApiError)
     expect(err.status).toBe(429)
+  })
+
+  it('me devuelve también es_admin', async () => {
+    vi.stubGlobal('fetch', reply(200, { username: 'admin', es_admin: true }))
+    await expect(me()).resolves.toEqual({ username: 'admin', es_admin: true })
+  })
+})
+
+describe('client: roles', () => {
+  const ROL = { id: 1, nombre: 'Tutor', descripcion: null, num_usuarios: 0 }
+
+  it('listRoles hace GET /api/roles', async () => {
+    const fetchMock = reply(200, [ROL])
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(listRoles()).resolves.toEqual([ROL])
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/roles')
+  })
+
+  it('createRole hace POST con nombre y descripción', async () => {
+    const fetchMock = reply(201, ROL)
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(createRole('Tutor', '')).resolves.toEqual(ROL)
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/roles')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body)).toEqual({ nombre: 'Tutor', descripcion: '' })
+  })
+
+  it('updateRole hace PUT /api/roles/{id}', async () => {
+    const fetchMock = reply(200, ROL)
+    vi.stubGlobal('fetch', fetchMock)
+    await updateRole(1, 'Tutor', 'd')
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/roles/1')
+    expect(init.method).toBe('PUT')
+    expect(JSON.parse(init.body)).toEqual({ nombre: 'Tutor', descripcion: 'd' })
+  })
+
+  it('deleteRole hace DELETE y acepta el 204 sin cuerpo', async () => {
+    const fetchMock = reply(204)
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(deleteRole(1)).resolves.toBeUndefined()
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/roles/1')
+    expect(fetchMock.mock.calls[0][1].method).toBe('DELETE')
+  })
+
+  it('deleteRole con 409 lanza ApiError con el detail', async () => {
+    vi.stubGlobal('fetch', reply(409, { detail: 'No se puede borrar: el rol está asignado a 1 usuario' }))
+    const err = await deleteRole(1).catch((e) => e)
+    expect(err).toBeInstanceOf(ApiError)
+    expect(err.status).toBe(409)
+    expect(err.message).toBe('No se puede borrar: el rol está asignado a 1 usuario')
+  })
+
+  it('roleUsers hace GET /api/roles/{id}/usuarios', async () => {
+    const fetchMock = reply(200, [])
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(roleUsers(3)).resolves.toEqual([])
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/roles/3/usuarios')
   })
 })

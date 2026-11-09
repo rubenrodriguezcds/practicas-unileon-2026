@@ -23,6 +23,8 @@
 > (login y home con logout) cuyo usuario vive en la base de datos.
 >
 > **Issue #4:** logo en el login, recuperación de contraseña por correo y captcha anti-bot.
+>
+> **Issue #5:** menú de la aplicación y gestión de roles, solo para el administrador.
 
 ## Arquitectura
 
@@ -125,6 +127,7 @@ python -c "import secrets;print(secrets.token_hex(32))"
 |---|---|
 | Aplicación web | http://localhost/login |
 | Recuperar contraseña | http://localhost/reset-password (o «¿Olvidaste tu contraseña?» en el login) |
+| Gestión de roles (solo administrador) | http://localhost/roles (o «Roles» en el menú) |
 | Estado de la API | http://localhost/api/health |
 | Documentación de la API | http://localhost/api/docs |
 | Consultar la bbdd | `docker compose exec db psql -U gestor -d gestor` (ya incluido), o cualquier cliente de PostgreSQL (DBeaver, pgAdmin…) con host `localhost` y puerto `1521` |
@@ -137,12 +140,22 @@ python -c "import secrets;print(secrets.token_hex(32))"
 
 | Método | Ruta | Respuesta |
 |---|---|---|
-| ![POST](https://img.shields.io/badge/POST-49cc90?style=flat-square) | `/api/auth/login` `{"username","password","altcha"}` | 200 `{"username"}` + cookie de sesión · 400 captcha no válido · 401 si las credenciales no son válidas |
+| ![POST](https://img.shields.io/badge/POST-49cc90?style=flat-square) | `/api/auth/login` `{"username","password","altcha"}` | 200 `{"username","es_admin"}` + cookie de sesión · 400 captcha no válido · 401 si las credenciales no son válidas |
 | ![POST](https://img.shields.io/badge/POST-49cc90?style=flat-square) | `/api/auth/reset` `{"username","altcha"}` | 202 siempre con el mismo mensaje · 400 captcha no válido · 429 demasiados intentos |
 | ![GET](https://img.shields.io/badge/GET-61affe?style=flat-square) | `/api/captcha` | 200 reto del captcha (caduca en 5 minutos) |
 | ![POST](https://img.shields.io/badge/POST-49cc90?style=flat-square) | `/api/auth/logout` | 204 |
-| ![GET](https://img.shields.io/badge/GET-61affe?style=flat-square) | `/api/auth/me` | 200 `{"username"}` · 401 sin sesión |
+| ![GET](https://img.shields.io/badge/GET-61affe?style=flat-square) | `/api/auth/me` | 200 `{"username","es_admin"}` · 401 sin sesión |
 | ![GET](https://img.shields.io/badge/GET-61affe?style=flat-square) | `/api/health` | 200 `{"status":"ok"}` |
+
+**Roles** (solo administrador: 401 sin sesión, **403** si el usuario no es administrador):
+
+| Método | Ruta | Respuesta |
+|---|---|---|
+| ![GET](https://img.shields.io/badge/GET-61affe?style=flat-square) | `/api/roles` | 200 lista de roles por nombre, con `num_usuarios` |
+| ![POST](https://img.shields.io/badge/POST-49cc90?style=flat-square) | `/api/roles` `{"nombre","descripcion"}` | 201 rol creado · 409 nombre repetido |
+| ![PUT](https://img.shields.io/badge/PUT-fca130?style=flat-square) | `/api/roles/{id}` `{"nombre","descripcion"}` | 200 rol editado · 404 · 409 nombre repetido |
+| ![DELETE](https://img.shields.io/badge/DELETE-f93e3e?style=flat-square) | `/api/roles/{id}` | 204 · 404 · 409 si algún usuario tiene el rol |
+| ![GET](https://img.shields.io/badge/GET-61affe?style=flat-square) | `/api/roles/{id}/usuarios` | 200 usuarios que tienen el rol · 404 |
 
 > [!WARNING]
 > Si la base de datos no está disponible, la API responde **503** «Base de datos no disponible».
@@ -198,6 +211,23 @@ Por qué así:
 
 </details>
 
+<details>
+<summary><b>Gestión de roles: cómo funciona y por qué así</b></summary>
+
+- **Quién es administrador** lo dice la columna `usuarios.es_admin` (por defecto `false`; el
+  `admin` del seed la tiene a `true`).
+- **Solo el administrador** ve la entrada «Roles» del menú. Esconderla es solo comodidad: quien
+  protege es la API, que comprueba `es_admin` **en la bbdd en cada petición** y responde 403 si no
+  lo es. Así, quitar el permiso a alguien surte efecto en su siguiente petición.
+- **Un usuario puede tener varios roles** (tabla `usuario_roles`).
+- **El nombre del rol es único**: dos roles con el mismo nombre serían indistinguibles.
+- **Un rol que tienen usuarios no se puede borrar** (409, indicando cuántos): borrarlo les quitaría
+  el rol sin avisar. La bbdd también lo impide (`ON DELETE RESTRICT`).
+- **Asignar roles a usuarios** todavía no tiene pantalla (la issue solo pide ver quién los tiene):
+  ver «¿Cómo asigno un rol a un usuario?» en Problemas frecuentes.
+
+</details>
+
 ## Cómo funciona por dentro
 
 - **Creación del modelo de datos**: los scripts de `db/init/` se ejecutan automáticamente
@@ -230,18 +260,20 @@ api/                      Backend FastAPI
   app/db.py               Conexión a Postgres y consultas
   app/migrations.py       Aplica las migraciones pendientes al arrancar
   app/security.py         Hash y verificación de contraseñas
+  app/deps.py             Permisos: exige sesión de administrador
   app/captcha.py          Retos y verificación del captcha ALTCHA
   app/mailer.py           Envío de correo (SMTP o log)
   app/routers/auth.py     Login, logout, sesión y reseteo de contraseña
   app/routers/captcha.py  Entrega retos del captcha
+  app/routers/roles.py    Gestión de roles (solo administrador)
   app/spa.py              Sirve el frontend compilado
   app/main.py             Monta la aplicación
   migrations/             Cambios de esquema (NNN_nombre.sql)
   tests/
 frontend/                 Frontend React + Vite + TypeScript
   src/api/client.ts       Único punto de llamada a la API
-  src/pages/              Login, ResetPassword y Home
-  src/components/         Captcha y Logo
+  src/pages/              Login, ResetPassword, Home y Roles
+  src/components/         Captcha, Logo y Layout (menú de las pantallas con sesión)
   src/App.tsx             Rutas y control de sesión
 docker/web.Dockerfile     Imagen del contenedor web
 ```
@@ -355,10 +387,40 @@ cambiar el esquema sin borrar datos, añade una migración en `api/migrations/`.
 
 </details>
 
+<details>
+<summary><b>¿Cómo asigno un rol a un usuario, o hago administrador a otro?</b></summary>
+
+De momento no hay pantalla para esto (la gestión de usuarios es otra issue). Desde `psql`
+(`docker compose exec db psql -U gestor -d gestor`):
+
+```sql
+-- Dar el rol 'Tutor' al usuario 'pepe' (el rol se crea antes en http://localhost/roles)
+INSERT INTO usuario_roles (usuario_id, rol_id)
+SELECT u.id, r.id FROM usuarios u, roles r WHERE u.username = 'pepe' AND r.nombre = 'Tutor';
+
+-- Quitárselo
+DELETE FROM usuario_roles
+WHERE usuario_id = (SELECT id FROM usuarios WHERE username = 'pepe')
+  AND rol_id = (SELECT id FROM roles WHERE nombre = 'Tutor');
+
+-- Hacer administrador a 'pepe' (o quitárselo con false)
+UPDATE usuarios SET es_admin = true WHERE username = 'pepe';
+```
+
+</details>
+
+<details>
+<summary><b>No veo «Roles» en el menú</b></summary>
+
+Solo aparece al administrador (`usuarios.es_admin = true`). Si acabas de cambiarlo en la bbdd,
+recarga la página.
+
+</details>
+
 ## Equipo
 
 | Persona | Parte |
 |---|---|
 | Sergio Martínez | Contenedor web (API y frontend) |
-| Mario Costello | Contenedor de base de datos y docker-compose |
+| Mario Costello | Contenedor de base de datos, docker-compose y gestión de roles |
 | Rubén Rodriguez | Tutor |

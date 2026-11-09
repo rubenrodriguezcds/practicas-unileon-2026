@@ -7,7 +7,7 @@ tablas; solo piden datos con funciones como `find_user`. Si mañana se cambia a 
 (SQLAlchemy) o se añaden tablas, el cambio queda aquí.
 
 Quién lo usa: routers/auth.py (a través de la dependencia de FastAPI `Depends(get_conn)`),
-captcha.py y migrations.py (que usa `connect` al arrancar).
+deps.py (permisos), captcha.py y migrations.py (que usa `connect` al arrancar).
 
 Notas:
   - Si Postgres no responde, se devuelve 503 «Base de datos no disponible» (y se deja en el log)
@@ -65,11 +65,21 @@ def find_user(conn, username: str) -> dict | None:
     tiene que comprobar fechas.
     """
     row = conn.execute(
-        "SELECT password_hash, email, CASE WHEN reset_expira > now() THEN reset_hash END"
+        "SELECT password_hash, email, CASE WHEN reset_expira > now() THEN reset_hash END, es_admin"
         " FROM usuarios WHERE username = %s",
         (username,),
     ).fetchone()
-    return {"password_hash": row[0], "email": row[1], "reset_hash": row[2]} if row else None
+    return {"password_hash": row[0], "email": row[1], "reset_hash": row[2], "es_admin": row[3]} if row else None
+
+
+def get_es_admin(conn, username: str) -> bool | None:
+    """Si el usuario es administrador; None si ya no existe (la sesión apunta a un usuario borrado).
+
+    Se consulta en cada petición protegida, en vez de guardarlo en la cookie, para que quitar el
+    permiso en la bbdd surta efecto al momento.
+    """
+    row = conn.execute("SELECT es_admin FROM usuarios WHERE username = %s", (username,)).fetchone()
+    return row[0] if row else None
 
 
 def save_pending_password(conn, username: str, hashed: str) -> None:
@@ -130,3 +140,90 @@ def add_reset_attempt(conn, keys: list[str]) -> None:
     for key in keys:
         conn.execute("INSERT INTO intentos_reset (clave) VALUES (%s)", (key,))
     conn.commit()
+
+
+# --- Roles (issue #5) ---
+
+class NombreDuplicado(Exception):
+    """Ya hay un rol con ese nombre (la columna roles.nombre es única)."""
+
+
+def _rol(row) -> dict:
+    return {"id": row[0], "nombre": row[1], "descripcion": row[2], "num_usuarios": row[3]}
+
+
+def list_roles(conn) -> list[dict]:
+    """Todos los roles por nombre, con cuántos usuarios tiene cada uno."""
+    rows = conn.execute(
+        "SELECT r.id, r.nombre, r.descripcion, count(ur.usuario_id) FROM roles r"
+        " LEFT JOIN usuario_roles ur ON ur.rol_id = r.id GROUP BY r.id ORDER BY r.nombre"
+    ).fetchall()
+    return [_rol(r) for r in rows]
+
+
+def create_role(conn, nombre: str, descripcion: str | None) -> dict:
+    """Crea un rol y lo devuelve.
+
+    Raises:
+        NombreDuplicado: si ya existe uno con ese nombre.
+    """
+    try:
+        row = conn.execute(
+            "INSERT INTO roles (nombre, descripcion) VALUES (%s, %s) RETURNING id, nombre, descripcion, 0",
+            (nombre, descripcion),
+        ).fetchone()
+    except psycopg.errors.UniqueViolation:
+        conn.rollback()
+        raise NombreDuplicado from None
+    conn.commit()
+    return _rol(row)
+
+
+def update_role(conn, rol_id: int, nombre: str, descripcion: str | None) -> dict | None:
+    """Renombra o edita un rol y lo devuelve; None si no existe.
+
+    Raises:
+        NombreDuplicado: si el nombre nuevo ya lo tiene otro rol.
+    """
+    try:
+        row = conn.execute(
+            "UPDATE roles SET nombre = %s, descripcion = %s WHERE id = %s RETURNING id, nombre, descripcion,"
+            " (SELECT count(*) FROM usuario_roles WHERE rol_id = roles.id)",
+            (nombre, descripcion, rol_id),
+        ).fetchone()
+    except psycopg.errors.UniqueViolation:
+        conn.rollback()
+        raise NombreDuplicado from None
+    conn.commit()
+    return _rol(row) if row else None
+
+
+def delete_role(conn, rol_id: int) -> int | None:
+    """Borra un rol si nadie lo tiene.
+
+    Returns:
+        None si el rol no existe; 0 si se ha borrado; N > 0 si lo tienen N usuarios y NO se borra
+        (la bbdd también lo impediría: ON DELETE RESTRICT).
+    """
+    row = conn.execute(
+        "SELECT (SELECT count(*) FROM usuario_roles WHERE rol_id = %s) FROM roles WHERE id = %s",
+        (rol_id, rol_id),
+    ).fetchone()
+    if row is None:
+        return None
+    if row[0] == 0:
+        conn.execute("DELETE FROM roles WHERE id = %s", (rol_id,))
+        conn.commit()
+    return row[0]
+
+
+def role_users(conn, rol_id: int) -> list[dict] | None:
+    """Usuarios que tienen el rol, por nombre; None si el rol no existe."""
+    if conn.execute("SELECT 1 FROM roles WHERE id = %s", (rol_id,)).fetchone() is None:
+        return None
+    rows = conn.execute(
+        "SELECT u.id, u.username, u.email FROM usuarios u JOIN usuario_roles ur ON ur.usuario_id = u.id"
+        " WHERE ur.rol_id = %s ORDER BY u.username",
+        (rol_id,),
+    ).fetchall()
+    return [{"id": r[0], "username": r[1], "email": r[2]} for r in rows]

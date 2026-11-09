@@ -1,7 +1,7 @@
 /**
  * Cliente de la API: el ÚNICO fichero del frontend que hace peticiones al backend.
  *
- * Para qué: ofrece funciones simples (login, logout, me, resetPassword) que las pantallas llaman sin saber nada
+ * Para qué: ofrece funciones simples (login, logout, me, resetPassword y las de roles) que las pantallas llaman sin saber nada
  * de fetch, URLs ni códigos HTTP. Los errores llegan como ApiError con el mensaje del backend,
  * listo para enseñarlo al usuario.
  *
@@ -27,6 +27,18 @@ export class ApiError extends Error {
 }
 
 /**
+ * Usuario de la sesión. `es_admin` decide si se enseña el menú de administración (la API lo
+ * comprueba otra vez en cada petición: esconder el menú no protege nada por sí solo).
+ */
+export type User = { username: string; es_admin: boolean }
+
+/** Rol tal como lo devuelve la API; `num_usuarios` es cuántos usuarios lo tienen. */
+export type Rol = { id: number; nombre: string; descripcion: string | null; num_usuarios: number }
+
+/** Usuario que tiene un rol (GET /api/roles/{id}/usuarios). */
+export type UsuarioDeRol = { id: number; username: string; email: string | null }
+
+/**
  * Envuelve `fetch` con cookies de sesión y cabecera JSON.
  * @throws {ApiError} si la respuesta no es 2xx, con el `detail` del cuerpo cuando existe.
  */
@@ -46,11 +58,11 @@ async function request(path: string, init?: RequestInit): Promise<Response> {
 /**
  * Inicia sesión con usuario, contraseña y captcha (POST /api/auth/login).
  * @param altcha payload del captcha resuelto (componente Captcha).
- * @returns el usuario autenticado.
+ * @returns el usuario autenticado y si es administrador.
  * @throws {ApiError} p. ej. 401 con "Usuario o contraseña incorrectos" o 400 con el captcha no
  *   válido; la pantalla Login muestra el mensaje.
  */
-export async function login(username: string, password: string, altcha: string): Promise<{ username: string }> {
+export async function login(username: string, password: string, altcha: string): Promise<User> {
   const res = await request('/api/auth/login', {
     method: 'POST',
     body: JSON.stringify({ username, password, altcha }),
@@ -68,10 +80,11 @@ export async function logout(): Promise<void> {
 
 /**
  * Consulta la sesión actual (GET /api/auth/me).
- * @returns el usuario, o `null` si no hay sesión (401), que es un caso normal y no un error.
+ * @returns el usuario (y si es administrador), o `null` si no hay sesión (401), que es un caso
+ *   normal y no un error.
  * @throws {ApiError} para cualquier otro fallo (p. ej. 503); App lo muestra en Login.
  */
-export async function me(): Promise<{ username: string } | null> {
+export async function me(): Promise<User | null> {
   try {
     return await (await request('/api/auth/me')).json()
   } catch (e) {
@@ -91,4 +104,42 @@ export async function resetPassword(username: string, altcha: string): Promise<{
     body: JSON.stringify({ username, altcha }),
   })
   return res.json()
+}
+
+// --- Roles (issue #5). Solo para el administrador: la API responde 403 a cualquier otro. ---
+
+/** Todos los roles, por nombre (GET /api/roles). */
+export async function listRoles(): Promise<Rol[]> {
+  return (await request('/api/roles')).json()
+}
+
+/**
+ * Crea un rol (POST /api/roles).
+ * @throws {ApiError} 409 si el nombre ya existe; Roles muestra el mensaje.
+ */
+export async function createRole(nombre: string, descripcion: string): Promise<Rol> {
+  const res = await request('/api/roles', { method: 'POST', body: JSON.stringify({ nombre, descripcion }) })
+  return res.json()
+}
+
+/**
+ * Renombra o edita un rol (PUT /api/roles/{id}).
+ * @throws {ApiError} 404 si ya no existe; 409 si el nombre lo tiene otro rol.
+ */
+export async function updateRole(id: number, nombre: string, descripcion: string): Promise<Rol> {
+  const res = await request(`/api/roles/${id}`, { method: 'PUT', body: JSON.stringify({ nombre, descripcion }) })
+  return res.json()
+}
+
+/**
+ * Borra un rol (DELETE /api/roles/{id}).
+ * @throws {ApiError} 409 si algún usuario lo tiene (el mensaje dice cuántos); 404 si ya no existe.
+ */
+export async function deleteRole(id: number): Promise<void> {
+  await request(`/api/roles/${id}`, { method: 'DELETE' })
+}
+
+/** Usuarios que tienen el rol (GET /api/roles/{id}/usuarios). */
+export async function roleUsers(id: number): Promise<UsuarioDeRol[]> {
+  return (await request(`/api/roles/${id}/usuarios`)).json()
 }

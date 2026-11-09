@@ -17,19 +17,19 @@
 
 import { useState, type SubmitEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { login } from '../api/client'
+import { login, type User } from '../api/client'
 import Captcha from '../components/Captcha'
 import Logo from '../components/Logo'
 
 /**
  * Formulario de inicio de sesión.
- * @param props.onLogin se llama con el nombre de usuario devuelto por la API cuando el login es correcto.
+ * @param props.onLogin se llama con el usuario devuelto por la API (nombre y si es admin) cuando el login es correcto.
  * @param props.initialError mensaje inicial a mostrar (App lo usa cuando `me()` falla por algo distinto de 401).
  * El botón "Entrar" se deshabilita con campos vacíos, sin captcha o con una petición en curso.
  * Si el login falla, el mensaje de la API se muestra en un `role="alert"` bajo el botón y el
  * captcha se vuelve a montar (`key`) para pedir un reto nuevo.
  */
-export default function Login({ onLogin, initialError = '' }: { onLogin: (username: string) => void; initialError?: string }) {
+export default function Login({ onLogin, initialError = '' }: { onLogin: (user: User) => void; initialError?: string }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState(initialError)
@@ -43,7 +43,7 @@ export default function Login({ onLogin, initialError = '' }: { onLogin: (userna
     setBusy(true)
     setError('')
     try {
-      onLogin((await login(username, password, altcha ?? '')).username)
+      onLogin(await login(username, password, altcha ?? ''))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error inesperado')
       setAltcha(null)
