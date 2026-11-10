@@ -62,6 +62,10 @@ class FakeDB:
         self.roles = {}  # id → {"nombre", "descripcion"}
         self.asignaciones = set()  # (usuario, rol_id)
         self.next_role_id = 1
+        self.proyectos = {}  # id → {"nombre", "tipo", "descripcion"}
+        self.documentos = {}  # id → {"proyecto_id", "nombre", "contenido"}
+        self.next_project_id = 1
+        self.next_document_id = 1
 
     @staticmethod
     def user(password, email=None, es_admin=False):
@@ -71,7 +75,9 @@ class FakeDB:
     def install(self, monkeypatch):
         for name in ("find_user", "get_es_admin", "save_pending_password", "promote_pending_password",
                      "discard_pending_password", "mark_captcha_used", "count_reset_attempts", "add_reset_attempt",
-                     "list_roles", "create_role", "update_role", "delete_role", "role_users"):
+                     "list_roles", "create_role", "update_role", "delete_role", "role_users",
+                     "list_projects", "create_project", "get_project", "delete_project",
+                     "add_document", "get_document", "delete_document"):
             monkeypatch.setattr(db, name, getattr(self, name))
         return FakeConn(self)
 
@@ -157,3 +163,59 @@ class FakeDB:
         ids = {u: i for i, u in enumerate(self.users, 1)}
         return [{"id": ids[u], "username": u, "email": self.users[u]["email"]}
                 for u in sorted(u for u, rid in self.asignaciones if rid == rol_id)]
+
+    # --- proyectos (issue #7): mismas reglas que la bbdd real (nombres únicos sin mayúsculas, cascada) ---
+
+    def add_project(self, nombre, docs=None, tipo=None, descripcion=None):
+        """Atajo de los tests: crea un proyecto con documentos {nombre: bytes} y devuelve su id."""
+        pid = self.create_project(None, nombre, tipo, descripcion)["id"]
+        for doc_nombre, contenido in (docs or {}).items():
+            self.add_document(None, pid, doc_nombre, contenido)
+        return pid
+
+    def _docs_de(self, pid):
+        return sorted(((did, d) for did, d in self.documentos.items() if d["proyecto_id"] == pid),
+                      key=lambda x: x[1]["nombre"].lower())
+
+    def _proyecto(self, pid):
+        p = self.proyectos[pid]
+        return {"id": pid, **p, "num_documentos": len(self._docs_de(pid))}
+
+    def list_projects(self, conn):
+        return sorted((self._proyecto(pid) for pid in self.proyectos), key=lambda p: p["nombre"].lower())
+
+    def create_project(self, conn, nombre, tipo, descripcion):
+        if any(p["nombre"].lower() == nombre.lower() for p in self.proyectos.values()):
+            raise db.NombreDuplicado
+        pid, self.next_project_id = self.next_project_id, self.next_project_id + 1
+        self.proyectos[pid] = {"nombre": nombre, "tipo": tipo, "descripcion": descripcion}
+        return self._proyecto(pid)
+
+    def get_project(self, conn, pid):
+        if pid not in self.proyectos:
+            return None
+        return {"id": pid, **self.proyectos[pid],
+                "documentos": [{"id": did, "nombre": d["nombre"], "tamano": len(d["contenido"])}
+                               for did, d in self._docs_de(pid)]}
+
+    def delete_project(self, conn, pid):
+        if self.proyectos.pop(pid, None) is None:
+            return False
+        self.documentos = {did: d for did, d in self.documentos.items() if d["proyecto_id"] != pid}  # cascada
+        return True
+
+    def add_document(self, conn, pid, nombre, contenido):
+        if pid not in self.proyectos:
+            return None
+        if any(d["nombre"].lower() == nombre.lower() for _, d in self._docs_de(pid)):
+            raise db.NombreDuplicado
+        did, self.next_document_id = self.next_document_id, self.next_document_id + 1
+        self.documentos[did] = {"proyecto_id": pid, "nombre": nombre, "contenido": contenido}
+        return {"id": did, "nombre": nombre, "tamano": len(contenido)}
+
+    def get_document(self, conn, did):
+        d = self.documentos.get(did)
+        return {"nombre": d["nombre"], "contenido": d["contenido"]} if d else None
+
+    def delete_document(self, conn, did):
+        return self.documentos.pop(did, None) is not None

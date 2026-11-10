@@ -227,3 +227,97 @@ def role_users(conn, rol_id: int) -> list[dict] | None:
         (rol_id,),
     ).fetchall()
     return [{"id": r[0], "username": r[1], "email": r[2]} for r in rows]
+
+
+# --- Proyectos (issue #7) ---
+# NombreDuplicado (arriba) sirve también aquí: proyectos y documentos tienen índices únicos sobre
+# lower(nombre), así que «Web» y «web» chocan y la bbdd lo garantiza sin carreras.
+
+def _proyecto(row) -> dict:
+    return {"id": row[0], "nombre": row[1], "tipo": row[2], "descripcion": row[3], "num_documentos": row[4]}
+
+
+def list_projects(conn) -> list[dict]:
+    """Todos los proyectos por nombre (sin distinguir mayúsculas), con cuántos documentos tiene cada uno."""
+    rows = conn.execute(
+        "SELECT p.id, p.nombre, p.tipo, p.descripcion, count(d.id) FROM proyectos p"
+        " LEFT JOIN documentos d ON d.proyecto_id = p.id GROUP BY p.id ORDER BY lower(p.nombre)"
+    ).fetchall()
+    return [_proyecto(r) for r in rows]
+
+
+def create_project(conn, nombre: str, tipo: str | None, descripcion: str | None) -> dict:
+    """Crea un proyecto y lo devuelve.
+
+    Raises:
+        NombreDuplicado: si ya existe uno con ese nombre (sin distinguir mayúsculas).
+    """
+    try:
+        row = conn.execute(
+            "INSERT INTO proyectos (nombre, tipo, descripcion) VALUES (%s, %s, %s)"
+            " RETURNING id, nombre, tipo, descripcion, 0",
+            (nombre, tipo, descripcion),
+        ).fetchone()
+    except psycopg.errors.UniqueViolation:
+        conn.rollback()
+        raise NombreDuplicado from None
+    conn.commit()
+    return _proyecto(row)
+
+
+def get_project(conn, proyecto_id: int) -> dict | None:
+    """Proyecto con la lista de sus documentos (id, nombre, tamaño en bytes); None si no existe.
+
+    No carga el contenido de los documentos: el tamaño sale de octet_length en la propia bbdd.
+    """
+    row = conn.execute(
+        "SELECT id, nombre, tipo, descripcion FROM proyectos WHERE id = %s", (proyecto_id,)
+    ).fetchone()
+    if row is None:
+        return None
+    docs = conn.execute(
+        "SELECT id, nombre, octet_length(contenido) FROM documentos WHERE proyecto_id = %s ORDER BY lower(nombre)",
+        (proyecto_id,),
+    ).fetchall()
+    return {"id": row[0], "nombre": row[1], "tipo": row[2], "descripcion": row[3],
+            "documentos": [{"id": d[0], "nombre": d[1], "tamano": d[2]} for d in docs]}
+
+
+def delete_project(conn, proyecto_id: int) -> bool:
+    """Borra un proyecto y, por ON DELETE CASCADE, todos sus documentos. False si no existía."""
+    borrado = conn.execute("DELETE FROM proyectos WHERE id = %s RETURNING id", (proyecto_id,)).fetchone()
+    conn.commit()
+    return borrado is not None
+
+
+def add_document(conn, proyecto_id: int, nombre: str, contenido: bytes) -> dict | None:
+    """Guarda un documento en un proyecto y lo devuelve (sin el contenido); None si el proyecto no existe.
+
+    Raises:
+        NombreDuplicado: si el proyecto ya tiene un documento con ese nombre (sin distinguir
+            mayúsculas; la extensión forma parte del nombre).
+    """
+    try:
+        row = conn.execute(
+            "INSERT INTO documentos (proyecto_id, nombre, contenido)"
+            " SELECT id, %s, %s FROM proyectos WHERE id = %s RETURNING id, nombre, octet_length(contenido)",
+            (nombre, contenido, proyecto_id),
+        ).fetchone()
+    except psycopg.errors.UniqueViolation:
+        conn.rollback()
+        raise NombreDuplicado from None
+    conn.commit()
+    return {"id": row[0], "nombre": row[1], "tamano": row[2]} if row else None
+
+
+def get_document(conn, documento_id: int) -> dict | None:
+    """Nombre y contenido de un documento; None si no existe."""
+    row = conn.execute("SELECT nombre, contenido FROM documentos WHERE id = %s", (documento_id,)).fetchone()
+    return {"nombre": row[0], "contenido": bytes(row[1])} if row else None
+
+
+def delete_document(conn, documento_id: int) -> bool:
+    """Borra un documento. False si no existía."""
+    borrado = conn.execute("DELETE FROM documentos WHERE id = %s RETURNING id", (documento_id,)).fetchone()
+    conn.commit()
+    return borrado is not None
