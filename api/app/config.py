@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     # Reseteos permitidos por hora, por usuario y por IP (más → 429).
     reset_max_por_hora: int = Field(default=5, ge=1)
 
+    # Tamaño máximo de un documento adjunto (routers/proyectos.py). Los documentos se guardan en
+    # Postgres y se cargan enteros en memoria al subir y descargar, así que el límite es bajo.
+    documento_max_mb: int = Field(default=50, ge=1)
+
     @model_validator(mode="after")
     def _clave_altcha(self):
         """Con el captcha activo, exige ALTCHA_HMAC_KEY de ≥ 32 caracteres (como APP_SECRET)."""
