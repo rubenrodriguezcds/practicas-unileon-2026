@@ -25,6 +25,8 @@
 > **Issue #4:** logo en el login, recuperación de contraseña por correo y captcha anti-bot.
 >
 > **Issue #5:** menú de la aplicación y gestión de roles, solo para el administrador.
+>
+> **Issue #7:** gestión de proyectos y de sus documentos adjuntos, solo para el administrador.
 
 ## Arquitectura
 
@@ -96,6 +98,7 @@ docker compose ps             # db (healthy) y web (Up)
 | `ALTCHA_HMAC_KEY` | Clave con la que la API firma los retos del captcha. **Mínimo 32 caracteres** o la web no arranca |
 | `ALTCHA_ENABLED` | `false` desactiva el captcha (solo tests o desarrollo; la API lo avisa en el log). Por defecto `true` |
 | `RESET_MAX_POR_HORA` | Reseteos de contraseña permitidos por hora, por usuario y por IP. Por defecto `5` |
+| `DOCUMENTO_MAX_MB` | Tamaño máximo de cada documento adjunto a un proyecto, en MB. Por defecto `50` |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | Servidor de correo para el reseteo. **Vacío = modo log** (ver aviso abajo) |
 | `SMTP_TLS` | `starttls` (puerto 587, Brevo y Gmail; por defecto), `ssl` (465) o `none` |
 
@@ -128,6 +131,7 @@ python -c "import secrets;print(secrets.token_hex(32))"
 | Aplicación web | http://localhost/login |
 | Recuperar contraseña | http://localhost/reset-password (o «¿Olvidaste tu contraseña?» en el login) |
 | Gestión de roles (solo administrador) | http://localhost/roles (o «Roles» en el menú) |
+| Gestión de proyectos y documentos (solo administrador) | http://localhost/proyectos (o «Proyectos» en el menú) |
 | Estado de la API | http://localhost/api/health |
 | Documentación de la API | http://localhost/api/docs |
 | Consultar la bbdd | `docker compose exec db psql -U gestor -d gestor` (ya incluido), o cualquier cliente de PostgreSQL (DBeaver, pgAdmin…) con host `localhost` y puerto `1521` |
@@ -156,6 +160,18 @@ python -c "import secrets;print(secrets.token_hex(32))"
 | ![PUT](https://img.shields.io/badge/PUT-fca130?style=flat-square) | `/api/roles/{id}` `{"nombre","descripcion"}` | 200 rol editado · 404 · 409 nombre repetido |
 | ![DELETE](https://img.shields.io/badge/DELETE-f93e3e?style=flat-square) | `/api/roles/{id}` | 204 · 404 · 409 si algún usuario tiene el rol |
 | ![GET](https://img.shields.io/badge/GET-61affe?style=flat-square) | `/api/roles/{id}/usuarios` | 200 usuarios que tienen el rol · 404 |
+
+**Proyectos y documentos** (solo administrador: 401 sin sesión, **403** si el usuario no es administrador):
+
+| Método | Ruta | Respuesta |
+|---|---|---|
+| ![GET](https://img.shields.io/badge/GET-61affe?style=flat-square) | `/api/proyectos` | 200 lista de proyectos por nombre, con `num_documentos` |
+| ![POST](https://img.shields.io/badge/POST-49cc90?style=flat-square) | `/api/proyectos` `{"nombre","tipo","descripcion"}` | 201 proyecto creado · 409 nombre repetido |
+| ![GET](https://img.shields.io/badge/GET-61affe?style=flat-square) | `/api/proyectos/{id}` | 200 proyecto con sus documentos (`id`, `nombre`, `tamano`, `visible`) · 404 |
+| ![DELETE](https://img.shields.io/badge/DELETE-f93e3e?style=flat-square) | `/api/proyectos/{id}` | 204 (borra también sus documentos) · 404 |
+| ![POST](https://img.shields.io/badge/POST-49cc90?style=flat-square) | `/api/proyectos/{id}/documentos` (multipart, campo `archivo`) | 201 documento · 404 · 409 nombre repetido · 413 demasiado grande · 415 tipo no permitido · 422 vacío |
+| ![GET](https://img.shields.io/badge/GET-61affe?style=flat-square) | `/api/documentos/{id}` (`?ver=1` para abrirlo en el navegador) | 200 el archivo · 404 |
+| ![DELETE](https://img.shields.io/badge/DELETE-f93e3e?style=flat-square) | `/api/documentos/{id}` | 204 · 404 |
 
 > [!WARNING]
 > Si la base de datos no está disponible, la API responde **503** «Base de datos no disponible».
@@ -228,6 +244,29 @@ Por qué así:
 
 </details>
 
+<details>
+<summary><b>Gestión de proyectos y documentos: cómo funciona y por qué así</b></summary>
+
+- **Solo el administrador**, igual que roles: la API responde 403 a cualquier otro.
+- **El nombre del proyecto es único sin distinguir mayúsculas** («Web» y «web» chocan). Nombre,
+  tipo y descripción no se editan después de crearlo: la edición solo añade y borra documentos.
+- **Borrar un proyecto borra todos sus documentos** (la bbdd lo hace sola, `ON DELETE CASCADE`).
+  La pantalla avisa antes de cuántos documentos se van a borrar.
+- **Los documentos se guardan dentro de Postgres** (columna `BYTEA`, el «blob» de Postgres): un
+  fichero entero tal cual. Por eso hay un tamaño máximo por documento (`DOCUMENTO_MAX_MB`, 50 MB).
+  Una subida que anuncia más tamaño se corta antes de leerla, para no llenar el disco.
+- **Solo se admiten algunos tipos**: PDF, imágenes (`png`, `jpg`, `jpeg`, `gif`, `webp`), texto
+  (`txt`, `md`, `csv`) y Office/LibreOffice (`doc`, `docx`, `xls`, `xlsx`, `ppt`, `pptx`, `odt`,
+  `ods`, `odp`). El resto (`html`, `svg`, ejecutables…) se rechaza con 415.
+- **«Ver» solo abre en el navegador PDF, imágenes y texto**; lo demás se descarga. Las descargas
+  llevan cabeceras que impiden que un documento ejecute código con la sesión del administrador.
+- **En un mismo proyecto no puede haber dos documentos con el mismo nombre** (con la extensión y
+  sin distinguir mayúsculas): `informe.pdf` e `informe.docx` pueden convivir.
+- **Se pueden arrastrar varios archivos a la vez**: cada uno se sube por separado y muestra su
+  estado, así que si uno falla los demás suben igual.
+
+</details>
+
 ## Cómo funciona por dentro
 
 - **Creación del modelo de datos**: los scripts de `db/init/` se ejecutan automáticamente
@@ -266,6 +305,8 @@ api/                      Backend FastAPI
   app/routers/auth.py     Login, logout, sesión y reseteo de contraseña
   app/routers/captcha.py  Entrega retos del captcha
   app/routers/roles.py    Gestión de roles (solo administrador)
+  app/routers/proyectos.py  Gestión de proyectos y documentos (solo administrador)
+  app/documentos.py       Tipos de archivo permitidos y nombres de los documentos
   app/spa.py              Sirve el frontend compilado
   app/main.py             Monta la aplicación
   migrations/             Cambios de esquema (NNN_nombre.sql)
@@ -273,7 +314,9 @@ api/                      Backend FastAPI
 frontend/                 Frontend React + Vite + TypeScript
   src/api/client.ts       Único punto de llamada a la API
   src/pages/              Login, ResetPassword, Home y Roles
+                          Proyectos y ProyectoDetalle (gestión de proyectos y documentos)
   src/components/         Captcha, Logo y Layout (menú de las pantallas con sesión)
+                          ConfirmDialog (aviso antes de borrar) y DropZone (arrastrar archivos)
   src/App.tsx             Rutas y control de sesión
 docker/web.Dockerfile     Imagen del contenedor web
 ```
