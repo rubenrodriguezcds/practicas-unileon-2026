@@ -21,6 +21,7 @@ ENDPOINTS = [
     ("get", "/api/proyectos", None),
     ("post", "/api/proyectos", {"nombre": "x"}),
     ("get", "/api/proyectos/1", None),
+    ("put", "/api/proyectos/1", {"nombre": "x"}),
     ("delete", "/api/proyectos/1", None),
     ("post", "/api/proyectos/1/documentos", None),
     ("get", "/api/documentos/1", None),
@@ -141,6 +142,46 @@ def test_detalle_inexistente_es_404(admin):
     assert r.status_code == 404 and r.json()["detail"] == "El proyecto no existe"
 
 
+# --- editar ---
+
+def test_editar_nombre_tipo_y_descripcion(admin, fake):
+    pid = fake.add_project("Web", {"a.pdf": b"1"}, tipo="Interno")
+    r = admin.put(f"/api/proyectos/{pid}", json={"nombre": " Portal ", "tipo": "Cliente", "descripcion": "Nueva"})
+    assert r.status_code == 200
+    assert r.json() == {"id": pid, "nombre": "Portal", "tipo": "Cliente", "descripcion": "Nueva", "num_documentos": 1}
+    assert fake.proyectos[pid] == {"nombre": "Portal", "tipo": "Cliente", "descripcion": "Nueva"}
+
+
+def test_editar_vacios_son_null(admin, fake):
+    pid = fake.add_project("Web", tipo="Interno", descripcion="Algo")
+    r = admin.put(f"/api/proyectos/{pid}", json={"nombre": "Web", "tipo": "", "descripcion": "  "})
+    assert r.json()["tipo"] is None and r.json()["descripcion"] is None
+
+
+def test_editar_cambiando_solo_mayusculas_de_su_propio_nombre_vale(admin, fake):
+    pid = fake.add_project("web")
+    assert admin.put(f"/api/proyectos/{pid}", json={"nombre": "Web"}).json()["nombre"] == "Web"
+
+
+def test_editar_con_nombre_de_otro_proyecto_es_409(admin, fake):
+    fake.add_project("Web")
+    pid = fake.add_project("App")
+    r = admin.put(f"/api/proyectos/{pid}", json={"nombre": "WEB"})
+    assert r.status_code == 409 and r.json()["detail"] == "Ya existe un proyecto con ese nombre"
+    assert fake.proyectos[pid]["nombre"] == "App"
+
+
+def test_editar_inexistente_es_404(admin):
+    r = admin.put("/api/proyectos/99", json={"nombre": "x"})
+    assert r.status_code == 404 and r.json()["detail"] == "El proyecto no existe"
+
+
+@pytest.mark.parametrize("body", [{}, {"nombre": "  "}, {"nombre": "x" * 101}, {"nombre": "x", "descripcion": "x" * 1001}])
+def test_editar_datos_no_validos_es_422(admin, fake, body):
+    pid = fake.add_project("Web")
+    assert admin.put(f"/api/proyectos/{pid}", json=body).status_code == 422
+
+
 # --- borrar ---
 
 def test_borrar_proyecto_borra_sus_documentos(admin, fake):
@@ -230,6 +271,19 @@ def test_content_length_excesivo_se_corta_sin_leer_el_cuerpo(anon, fake, pid):
     assert fake.documentos == {}
 
 
+def test_peticion_json_excesiva_no_habla_de_archivos(anon):
+    r = anon.post("/api/auth/login", content=b"{}",
+                  headers={"Content-Length": str(10 * 1024**3), "Content-Type": "application/json"})
+    assert r.status_code == 413 and r.json()["detail"] == "La petición es demasiado grande"
+
+
+def test_subir_nombre_con_acentos_de_mac_choca_con_el_de_windows(admin, fake):
+    """macOS manda «é» como «e» + tilde suelta (NFD); se guarda normalizado (NFC) para que el 409 funcione."""
+    pid = fake.add_project("Web", {"Memoria t\u00e9cnica.pdf": b"1"})
+    r = subir(admin, pid, "Memoria te\u0301cnica.pdf")
+    assert r.status_code == 409
+
+
 def test_sin_content_length_y_por_trozos_es_411(admin, fake):
     pid = fake.add_project("Web")
     r = admin.post(f"/api/proyectos/{pid}/documentos", content=iter([b"trozo"]),
@@ -299,6 +353,39 @@ def test_ver_docx_se_descarga_igual(admin, fake):
 def test_descargar_nombre_con_acentos(admin, fake):
     fake.add_project("Web", {"Memoria técnica.pdf": b"%PDF"})
     assert "filename*=UTF-8''Memoria%20t%C3%A9cnica.pdf" in admin.get("/api/documentos/1").headers["content-disposition"]
+
+
+def test_texto_en_utf8_se_sirve_como_utf8(admin, fake):
+    fake.add_project("Web", {"a.csv": "año;horas\n".encode()})
+    assert admin.get("/api/documentos/1?ver=1").headers["content-type"] == "text/plain; charset=utf-8"
+
+
+def test_texto_que_no_es_utf8_se_sirve_como_windows_1252(admin, fake):
+    """El Excel en español guarda los CSV en Windows-1252: con charset=utf-8 las tildes saldrían rotas."""
+    fake.add_project("Web", {"a.csv": "año;horas\n".encode("cp1252")})
+    r = admin.get("/api/documentos/1?ver=1")
+    assert r.headers["content-type"] == "text/plain; charset=windows-1252"
+    assert r.text == "año;horas\n"
+
+
+def test_enlace_del_navegador_sin_sesion_lleva_al_login(anon, fake):
+    """«Ver» y «Descargar» son enlaces: con la sesión caducada, al login y no un JSON de error."""
+    fake.add_project("Web", {"a.pdf": b"%PDF"})
+    r = anon.get("/api/documentos/1", headers={"Accept": "text/html,*/*"}, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/login"
+
+
+def test_enlace_del_navegador_de_usuario_normal_sigue_siendo_403(anon, fake):
+    fake.add_project("Web", {"a.pdf": b"%PDF"})
+    login(anon, "pepe", "clave")
+    r = anon.get("/api/documentos/1", headers={"Accept": "text/html"}, follow_redirects=False)
+    assert r.status_code == 403
+
+
+def test_borrar_documento_sin_sesion_sigue_siendo_401(anon, fake):
+    fake.add_project("Web", {"a.pdf": b"%PDF"})
+    r = anon.delete("/api/documentos/1", headers={"Accept": "text/html"}, follow_redirects=False)
+    assert r.status_code == 401 and len(fake.documentos) == 1
 
 
 def test_descargar_inexistente_es_404(admin):

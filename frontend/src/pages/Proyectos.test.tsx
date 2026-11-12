@@ -16,7 +16,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import {
-  ApiError, createProject, deleteDocument, deleteProject, getProject, listProjects, uploadDocument,
+  ApiError, createProject, deleteDocument, deleteProject, getProject, listProjects, updateProject, uploadDocument,
   type Proyecto, type ProyectoDetalle,
 } from '../api/client'
 import ProyectoDetallePage from './ProyectoDetalle'
@@ -30,6 +30,7 @@ vi.mock('../api/client', async (orig) => ({
   deleteProject: vi.fn(),
   uploadDocument: vi.fn(),
   deleteDocument: vi.fn(),
+  updateProject: vi.fn(),
 }))
 
 beforeAll(() => {
@@ -147,7 +148,8 @@ describe('ProyectoDetalle', () => {
     const ver = within(pdf).getByRole('link', { name: 'Ver' })
     expect(ver).toHaveAttribute('href', '/api/documentos/10?ver=1')
     expect(ver).toHaveAttribute('target', '_blank')
-    expect(within(pdf).getByRole('link', { name: 'Descargar' })).toHaveAttribute('download')
+    // Sin `download`: la API ya manda «attachment», y así, con la sesión caducada, el navegador va al login.
+    expect(within(pdf).getByRole('link', { name: 'Descargar' })).not.toHaveAttribute('download')
     const docx = await fila('b.docx')
     expect(within(docx).queryByRole('link', { name: 'Ver' })).not.toBeInTheDocument()
     expect(within(docx).getByRole('link', { name: 'Descargar' })).toHaveAttribute('href', '/api/documentos/11')
@@ -167,6 +169,53 @@ describe('ProyectoDetalle', () => {
     )
     expect(await screen.findByRole('alert')).toHaveTextContent('El proyecto no existe')
     expect(getProject).not.toHaveBeenCalled()
+  })
+
+  it('edita nombre, tipo y descripción y vuelve a pedir el detalle', async () => {
+    vi.mocked(updateProject).mockResolvedValue({ ...WEB, nombre: 'Portal' })
+    verDetalle()
+    await userEvent.click(await screen.findByRole('button', { name: 'Editar' }))
+    const form = screen.getByRole('form', { name: 'Editar proyecto' })
+    expect(within(form).getByLabelText('Tipo')).toHaveValue('Interno')
+    const nombre = within(form).getByLabelText('Nombre')
+    await userEvent.clear(nombre)
+    await userEvent.type(nombre, 'Portal')
+    await userEvent.click(within(form).getByRole('button', { name: 'Guardar' }))
+    expect(updateProject).toHaveBeenCalledWith(1, { nombre: 'Portal', tipo: 'Interno', descripcion: 'La web del proyecto' })
+    await waitFor(() => expect(screen.queryByRole('form', { name: 'Editar proyecto' })).not.toBeInTheDocument())
+    expect(getProject).toHaveBeenCalledTimes(2)
+  })
+
+  it('al editar, el 409 se muestra y el formulario sigue abierto', async () => {
+    vi.mocked(updateProject).mockRejectedValue(new ApiError(409, 'Ya existe un proyecto con ese nombre'))
+    verDetalle()
+    await userEvent.click(await screen.findByRole('button', { name: 'Editar' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Guardar' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Ya existe un proyecto con ese nombre')
+    expect(screen.getByRole('form', { name: 'Editar proyecto' })).toBeInTheDocument()
+  })
+
+  it('cancelar la edición no guarda nada', async () => {
+    verDetalle()
+    await userEvent.click(await screen.findByRole('button', { name: 'Editar' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Cancelar' }))
+    expect(screen.queryByRole('form', { name: 'Editar proyecto' })).not.toBeInTheDocument()
+    expect(updateProject).not.toHaveBeenCalled()
+  })
+
+  it('mientras sube, cerrar o recargar la pestaña pide confirmación', async () => {
+    let terminar = () => {}
+    vi.mocked(uploadDocument).mockReturnValue(new Promise((ok) => { terminar = () => ok({ id: 12, nombre: 'c.pdf', tamano: 1 }) }))
+    verDetalle()
+    await soltar(archivo('c.pdf'))
+    const durante = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(durante)
+    expect(durante.defaultPrevented).toBe(true)
+    terminar()
+    await screen.findByText('Subido')
+    const despues = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(despues)
+    expect(despues.defaultPrevented).toBe(false)
   })
 
   it('borra un documento tras confirmar', async () => {

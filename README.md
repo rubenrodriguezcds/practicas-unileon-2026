@@ -168,9 +168,10 @@ python -c "import secrets;print(secrets.token_hex(32))"
 | ![GET](https://img.shields.io/badge/GET-61affe?style=flat-square) | `/api/proyectos` | 200 lista de proyectos por nombre, con `num_documentos` |
 | ![POST](https://img.shields.io/badge/POST-49cc90?style=flat-square) | `/api/proyectos` `{"nombre","tipo","descripcion"}` | 201 proyecto creado · 409 nombre repetido |
 | ![GET](https://img.shields.io/badge/GET-61affe?style=flat-square) | `/api/proyectos/{id}` | 200 proyecto con sus documentos (`id`, `nombre`, `tamano`, `visible`) · 404 |
+| ![PUT](https://img.shields.io/badge/PUT-fca130?style=flat-square) | `/api/proyectos/{id}` `{"nombre","tipo","descripcion"}` | 200 proyecto editado · 404 · 409 nombre repetido |
 | ![DELETE](https://img.shields.io/badge/DELETE-f93e3e?style=flat-square) | `/api/proyectos/{id}` | 204 (borra también sus documentos) · 404 |
-| ![POST](https://img.shields.io/badge/POST-49cc90?style=flat-square) | `/api/proyectos/{id}/documentos` (multipart, campo `archivo`) | 201 documento · 404 · 409 nombre repetido · 413 demasiado grande · 415 tipo no permitido · 422 vacío |
-| ![GET](https://img.shields.io/badge/GET-61affe?style=flat-square) | `/api/documentos/{id}` (`?ver=1` para abrirlo en el navegador) | 200 el archivo · 404 |
+| ![POST](https://img.shields.io/badge/POST-49cc90?style=flat-square) | `/api/proyectos/{id}/documentos` (multipart, campo `archivo`) | 201 documento · 404 · 409 nombre repetido · 411 sin `Content-Length` · 413 demasiado grande · 415 tipo no permitido · 422 vacío |
+| ![GET](https://img.shields.io/badge/GET-61affe?style=flat-square) | `/api/documentos/{id}` (`?ver=1` para abrirlo en el navegador) | 200 el archivo · 404 · 303 al login si se abre desde el navegador sin sesión |
 | ![DELETE](https://img.shields.io/badge/DELETE-f93e3e?style=flat-square) | `/api/documentos/{id}` | 204 · 404 |
 
 > [!WARNING]
@@ -249,7 +250,7 @@ Por qué así:
 
 - **Solo el administrador**, igual que roles: la API responde 403 a cualquier otro.
 - **El nombre del proyecto es único sin distinguir mayúsculas** («Web» y «web» chocan). Nombre,
-  tipo y descripción no se editan después de crearlo: la edición solo añade y borra documentos.
+  tipo y descripción se pueden editar; los documentos no: se borran y se suben de nuevo.
 - **Borrar un proyecto borra todos sus documentos** (la bbdd lo hace sola, `ON DELETE CASCADE`).
   La pantalla avisa antes de cuántos documentos se van a borrar.
 - **Los documentos se guardan dentro de Postgres** (columna `BYTEA`, el «blob» de Postgres): un

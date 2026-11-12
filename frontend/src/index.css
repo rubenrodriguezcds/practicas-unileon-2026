@@ -81,3 +81,5 @@ dialog .botones { display: flex; justify-content: flex-end; gap: 0.5rem; }
 .subidas li.subido { background: #ecfdf5; color: #047857; }
 .subidas li.error { background: #fef2f2; color: #b91c1c; }
 td.acciones a { align-self: center; font-size: 0.9rem; }
+/* Botón suelto dentro de .pagina (columna flex): a su tamaño, no a todo el ancho. */
+.pagina > button.suelto { align-self: flex-start; }

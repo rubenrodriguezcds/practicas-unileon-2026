@@ -1,29 +1,33 @@
 """Endpoints de gestión de proyectos y sus documentos adjuntos: /api/proyectos y /api/documentos (issue #7).
 
-Para qué: es lo que llaman las pantallas de proyectos del frontend para crear, listar y borrar
-proyectos, y para subir, ver, descargar y borrar sus documentos.
+Para qué: es lo que llaman las pantallas de proyectos del frontend para crear, listar, editar y
+borrar proyectos, y para subir, ver, descargar y borrar sus documentos.
 
 Por qué existe: la issue #7 pide un menú de gestión de proyectos. De momento solo lo usa el
-administrador (como roles): los dos routers dependen de `require_admin` (app/deps.py), así que no
-hay forma de añadir un endpoint aquí y olvidarse de protegerlo. Abrirlo a más usuarios es cambiar
-esa dependencia.
+administrador (como roles): los dos routers dependen de `require_admin` (app/deps.py; el de
+documentos a través de `admin_o_login`, que solo cambia la respuesta sin sesión), así que no hay
+forma de añadir un endpoint aquí y olvidarse de protegerlo. Abrirlo a más usuarios es cambiar esa
+dependencia.
 
 Contrato (el frontend depende de él):
   GET    /api/proyectos            → 200 [{"id","nombre","tipo","descripcion","num_documentos"}] por nombre
   POST   /api/proyectos            {"nombre","tipo","descripcion"} → 201 proyecto · 409 nombre repetido
   GET    /api/proyectos/{id}       → 200 proyecto + "documentos": [{"id","nombre","tamano","visible"}] · 404
+  PUT    /api/proyectos/{id}       {"nombre","tipo","descripcion"} → 200 proyecto · 404 · 409 nombre repetido
   DELETE /api/proyectos/{id}       → 204 (borra también sus documentos) · 404
   POST   /api/proyectos/{id}/documentos  multipart, campo "archivo" → 201 {"id","nombre","tamano"}
                                    · 404 · 409 nombre repetido · 411/413 tamaño · 415 tipo · 422 vacío
   GET    /api/documentos/{id}      → 200 el archivo (descarga; con ?ver=1 se abre en el navegador si es
-                                     de un tipo que se puede ver) · 404
+                                     de un tipo que se puede ver) · 404 · 303 al login si es un enlace
+                                     del navegador sin sesión
   DELETE /api/documentos/{id}      → 204 · 404
   En todos: 401 sin sesión · 403 si no es administrador · 422 datos no válidos · 503 bbdd caída.
 
 Decisiones:
   - Nombre de proyecto único sin distinguir mayúsculas («Web» = «web»), aunque la issue no lo pide:
-    dos proyectos que se llaman igual confunden. Nombre, tipo y descripción no se editan después de
-    crear el proyecto: la issue dice que la edición solo añade y borra documentos.
+    dos proyectos que se llaman igual confunden.
+  - Editar un proyecto es cambiar su nombre, tipo o descripción, y añadir o borrar documentos. Un
+    documento no se edita: se borra y se sube otro.
   - `visible` (si el navegador puede mostrar el documento) lo decide la API con app/documentos.py,
     para no repetir la lista de tipos en el frontend.
 
@@ -40,10 +44,26 @@ from starlette.datastructures import UploadFile
 from app import db
 from app.db import get_conn
 from app.deps import require_admin
-from app.documentos import content_disposition, limpiar_nombre, tipo_de
+from app.documentos import charset_texto, content_disposition, limpiar_nombre, tipo_de
+
+
+def admin_o_login(request: Request, conn=Depends(get_conn)) -> str:
+    """`require_admin`, pero un enlace del navegador sin sesión va al login en vez de a un JSON de error.
+
+    «Ver» y «Descargar» son enlaces normales: con la sesión caducada, el navegador enseñaría (o
+    bajaría como si fuera el documento) el JSON del 401. Solo en GET y solo si el navegador pide
+    HTML (es una navegación): un DELETE o una llamada desde código siguen recibiendo el 401.
+    """
+    try:
+        return require_admin(request, conn)
+    except HTTPException as e:
+        if e.status_code == 401 and request.method == "GET" and "text/html" in request.headers.get("accept", ""):
+            raise HTTPException(303, headers={"Location": "/login"}) from None
+        raise
+
 
 router = APIRouter(prefix="/api/proyectos", dependencies=[Depends(require_admin)])
-documentos_router = APIRouter(prefix="/api/documentos", dependencies=[Depends(require_admin)])
+documentos_router = APIRouter(prefix="/api/documentos", dependencies=[Depends(admin_o_login)])
 
 DUPLICADO_MSG = "Ya existe un proyecto con ese nombre"
 NO_EXISTE_MSG = "El proyecto no existe"
@@ -110,6 +130,22 @@ def detalle(proyecto_id: int, conn=Depends(get_conn)):
     for doc in proyecto["documentos"]:
         tipo = tipo_de(doc["nombre"])
         doc["visible"] = bool(tipo and tipo.visible)
+    return proyecto
+
+
+@router.put("/{proyecto_id}")
+def editar(proyecto_id: int, body: ProyectoIn, conn=Depends(get_conn)):
+    """Cambia el nombre, el tipo y la descripción de un proyecto (sus documentos no se tocan).
+
+    Raises:
+        HTTPException: 404 si no existe; 409 si el nombre nuevo ya lo tiene otro proyecto.
+    """
+    try:
+        proyecto = db.update_project(conn, proyecto_id, body.nombre, body.tipo, body.descripcion)
+    except db.NombreDuplicado:
+        raise HTTPException(409, DUPLICADO_MSG) from None
+    if proyecto is None:
+        raise HTTPException(404, NO_EXISTE_MSG)
     return proyecto
 
 
@@ -187,6 +223,8 @@ def descargar(documento_id: int, ver: bool = False, conn=Depends(get_conn)):
     tipo = tipo_de(doc["nombre"])
     # Un documento guardado antes de cambiar la lista de tipos se sirve como binario genérico.
     content_type = tipo.content_type if tipo else "application/octet-stream"
+    if content_type.startswith("text/plain"):
+        content_type = f"text/plain; charset={charset_texto(doc['contenido'])}"
     inline = ver and bool(tipo and tipo.visible)
     headers = {**SEGURIDAD, "Content-Disposition": content_disposition(doc["nombre"], inline)}
     if content_type not in SIN_SANDBOX:

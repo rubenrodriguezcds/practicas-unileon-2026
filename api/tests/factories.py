@@ -77,6 +77,7 @@ class FakeDB:
                      "discard_pending_password", "mark_captcha_used", "count_reset_attempts", "add_reset_attempt",
                      "list_roles", "create_role", "update_role", "delete_role", "role_users",
                      "list_projects", "create_project", "get_project", "delete_project",
+                     "update_project",
                      "add_document", "get_document", "delete_document"):
             monkeypatch.setattr(db, name, getattr(self, name))
         return FakeConn(self)
@@ -197,6 +198,14 @@ class FakeDB:
         return {"id": pid, **self.proyectos[pid],
                 "documentos": [{"id": did, "nombre": d["nombre"], "tamano": len(d["contenido"])}
                                for did, d in self._docs_de(pid)]}
+
+    def update_project(self, conn, pid, nombre, tipo, descripcion):
+        if pid not in self.proyectos:
+            return None
+        if any(p["nombre"].lower() == nombre.lower() for i, p in self.proyectos.items() if i != pid):
+            raise db.NombreDuplicado
+        self.proyectos[pid] = {"nombre": nombre, "tipo": tipo, "descripcion": descripcion}
+        return self._proyecto(pid)
 
     def delete_project(self, conn, pid):
         if self.proyectos.pop(pid, None) is None:

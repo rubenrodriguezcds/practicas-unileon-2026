@@ -87,7 +87,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if largo is None and "transfer-encoding" in request.headers:
                 return JSONResponse({"detail": "Falta la cabecera Content-Length"}, status_code=411)
             if largo is not None and (not largo.isdigit() or int(largo) > (max_mb + 1) * 1024 * 1024):
-                return JSONResponse({"detail": proyectos.tamano_msg(max_mb)}, status_code=413)
+                # El tipo de contenido solo elige el mensaje; el corte no depende de él.
+                es_archivo = request.headers.get("content-type", "").startswith("multipart/form-data")
+                msg = proyectos.tamano_msg(max_mb) if es_archivo else "La petición es demasiado grande"
+                return JSONResponse({"detail": msg}, status_code=413)
         return await call_next(request)
 
     @app.get("/api/health")

@@ -283,6 +283,26 @@ def get_project(conn, proyecto_id: int) -> dict | None:
             "documentos": [{"id": d[0], "nombre": d[1], "tamano": d[2]} for d in docs]}
 
 
+def update_project(conn, proyecto_id: int, nombre: str, tipo: str | None, descripcion: str | None) -> dict | None:
+    """Cambia nombre, tipo y descripción de un proyecto y lo devuelve; None si no existe.
+
+    Raises:
+        NombreDuplicado: si el nombre nuevo ya lo tiene otro proyecto (sin distinguir mayúsculas).
+    """
+    try:
+        row = conn.execute(
+            "UPDATE proyectos SET nombre = %s, tipo = %s, descripcion = %s WHERE id = %s"
+            " RETURNING id, nombre, tipo, descripcion,"
+            " (SELECT count(*) FROM documentos WHERE proyecto_id = proyectos.id)",
+            (nombre, tipo, descripcion, proyecto_id),
+        ).fetchone()
+    except psycopg.errors.UniqueViolation:
+        conn.rollback()
+        raise NombreDuplicado from None
+    conn.commit()
+    return _proyecto(row) if row else None
+
+
 def delete_project(conn, proyecto_id: int) -> bool:
     """Borra un proyecto y, por ON DELETE CASCADE, todos sus documentos. False si no existía."""
     borrado = conn.execute("DELETE FROM proyectos WHERE id = %s RETURNING id", (proyecto_id,)).fetchone()
@@ -298,9 +318,10 @@ def add_document(conn, proyecto_id: int, nombre: str, contenido: bytes) -> dict 
             mayúsculas; la extensión forma parte del nombre).
     """
     try:
+        # %b: el contenido viaja en binario; en texto psycopg lo pasaría a hexadecimal (el doble de bytes).
         row = conn.execute(
             "INSERT INTO documentos (proyecto_id, nombre, contenido)"
-            " SELECT id, %s, %s FROM proyectos WHERE id = %s RETURNING id, nombre, octet_length(contenido)",
+            " SELECT id, %s, %b FROM proyectos WHERE id = %s RETURNING id, nombre, octet_length(contenido)",
             (nombre, contenido, proyecto_id),
         ).fetchone()
     except psycopg.errors.UniqueViolation:
@@ -312,7 +333,8 @@ def add_document(conn, proyecto_id: int, nombre: str, contenido: bytes) -> dict 
 
 def get_document(conn, documento_id: int) -> dict | None:
     """Nombre y contenido de un documento; None si no existe."""
-    row = conn.execute("SELECT nombre, contenido FROM documentos WHERE id = %s", (documento_id,)).fetchone()
+    # binary=True: sin él, Postgres manda el contenido en hexadecimal (el doble de bytes que decodificar).
+    row = conn.execute("SELECT nombre, contenido FROM documentos WHERE id = %s", (documento_id,), binary=True).fetchone()
     return {"nombre": row[0], "contenido": bytes(row[1])} if row else None
 
 

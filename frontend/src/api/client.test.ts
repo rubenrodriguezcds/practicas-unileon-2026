@@ -10,7 +10,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ApiError, createProject, createRole, deleteDocument, deleteProject, deleteRole, documentUrl, getProject,
-  listProjects, listRoles, login, me, resetPassword, roleUsers, updateRole, uploadDocument,
+  listProjects, listRoles, login, me, resetPassword, roleUsers, updateProject, updateRole, uploadDocument,
 } from './client'
 
 // Crea un `fetch` simulado que responde con el status y el cuerpo JSON dados.
@@ -143,6 +143,16 @@ describe('client: proyectos y documentos', () => {
     expect(init.method).toBe('POST')
     expect(init.headers['Content-Type']).toBe('application/json')
     expect(JSON.parse(init.body)).toEqual({ nombre: 'Web', tipo: '', descripcion: '' })
+  })
+
+  it('updateProject manda nombre, tipo y descripción con PUT', async () => {
+    const fetchMock = reply(200, PROYECTO)
+    vi.stubGlobal('fetch', fetchMock)
+    await updateProject(1, { nombre: 'Web', tipo: 'Interno', descripcion: '' })
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/proyectos/1')
+    expect(init.method).toBe('PUT')
+    expect(JSON.parse(init.body)).toEqual({ nombre: 'Web', tipo: 'Interno', descripcion: '' })
   })
 
   it('createProject con 409 lanza ApiError con el detail', async () => {

@@ -9,8 +9,7 @@
  * funciones de proyectos de src/api/client.ts y el aviso de components/ConfirmDialog.tsx.
  *
  * Notas:
- *  - Nombre, tipo y descripción no se editan después de crear el proyecto: la issue dice que la
- *    edición solo añade y borra documentos.
+ *  - Nombre, tipo y descripción se editan en el detalle (ProyectoDetalle.tsx), junto a sus documentos.
  *  - Borrar avisa de cuántos documentos se borrarán con él, porque no se puede deshacer.
  *  - Los errores son los de la API, tal cual («Ya existe un proyecto con ese nombre»…), y tras
  *    cada cambio se vuelve a pedir el listado (como en Roles.tsx).

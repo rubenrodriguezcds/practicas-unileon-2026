@@ -7,7 +7,7 @@ los acentos sin permitir inyectar comillas.
 
 import pytest
 
-from app.documentos import TipoArchivo, content_disposition, limpiar_nombre, tipo_de
+from app.documentos import TipoArchivo, charset_texto, content_disposition, limpiar_nombre, tipo_de
 
 DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
@@ -38,6 +38,16 @@ def test_limpiar_nombre_quita_rutas_espacios_y_control():
     assert limpiar_nombre("../../etc/informe.pdf") == "informe.pdf"
     assert limpiar_nombre("  a.pdf  ") == "a.pdf"
     assert limpiar_nombre("a\x00b.pdf") == "ab.pdf"
+
+
+def test_limpiar_nombre_normaliza_los_acentos_de_mac():
+    assert limpiar_nombre("técnica.pdf") == "técnica.pdf"
+
+
+def test_charset_de_texto():
+    assert charset_texto("año".encode()) == "utf-8"
+    assert charset_texto("﻿año".encode()) == "utf-8"  # con BOM, como lo guarda el Bloc de notas
+    assert charset_texto("año".encode("cp1252")) == "windows-1252"
 
 
 @pytest.mark.parametrize("nombre", ["", "   ", "a" * 252 + ".pdf"])

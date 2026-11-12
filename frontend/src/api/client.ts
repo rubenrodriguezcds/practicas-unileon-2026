@@ -179,6 +179,15 @@ export async function getProject(id: number): Promise<ProyectoDetalle> {
 }
 
 /**
+ * Cambia nombre, tipo y descripción de un proyecto (PUT /api/proyectos/{id}). Los textos van tal cual, como al crear.
+ * @throws {ApiError} 409 si otro proyecto ya tiene ese nombre; 404 si ya no existe.
+ */
+export async function updateProject(id: number, p: { nombre: string; tipo: string; descripcion: string }): Promise<Proyecto> {
+  const res = await request(`/api/proyectos/${id}`, { method: 'PUT', body: JSON.stringify(p) })
+  return res.json()
+}
+
+/**
  * Borra un proyecto y sus documentos (DELETE /api/proyectos/{id}).
  * @throws {ApiError} 404 si ya no existe.
  */

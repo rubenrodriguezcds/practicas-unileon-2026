@@ -1,7 +1,7 @@
 /**
  * Detalle de un proyecto (issue #7), solo para el administrador: sus datos y sus documentos.
  *
- * Para qué: ver el nombre, tipo y descripción del proyecto; la tabla de sus documentos con «Ver»
+ * Para qué: ver y editar el nombre, tipo y descripción del proyecto; la tabla de sus documentos con «Ver»
  * (solo los que el navegador sabe mostrar), «Descargar» y «Borrar»; y subir documentos nuevos
  * arrastrándolos (varios a la vez) a la zona de components/DropZone.tsx.
  *
@@ -15,12 +15,18 @@
  *  - Los de más de MAX_MB se avisan sin subirlos. La API lo comprueba igual; esto solo evita
  *    mandar un archivo grande para nada.
  *  - Qué documentos se pueden «Ver» lo dice la API (`visible`), para no repetir la lista de tipos.
- *  - «Ver» y «Descargar» son enlaces normales: el navegador manda la cookie de sesión.
+ *  - «Ver» y «Descargar» son enlaces normales: el navegador manda la cookie de sesión. «Descargar»
+ *    no lleva `download`: la API ya manda `attachment`, y así, si la sesión ha caducado, la API
+ *    redirige al login y el navegador lo abre (con `download` bajaría el error como si fuera el archivo).
+ *  - Mientras sube, cerrar o recargar la pestaña pide confirmación: cortaría las subidas pendientes.
+ *    Navegar dentro de la app no las corta (las peticiones siguen aunque se cambie de pantalla).
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type SubmitEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { deleteDocument, documentUrl, getProject, uploadDocument, type Documento, type ProyectoDetalle } from '../api/client'
+import {
+  deleteDocument, documentUrl, getProject, updateProject, uploadDocument, type Documento, type ProyectoDetalle,
+} from '../api/client'
 import ConfirmDialog from '../components/ConfirmDialog'
 import DropZone from '../components/DropZone'
 
@@ -48,6 +54,8 @@ export default function ProyectoDetallePage() {
   const [subidas, setSubidas] = useState<Subida[]>([])
   const [subiendo, setSubiendo] = useState(false)
   const [borrando, setBorrando] = useState<Documento | null>(null)
+  const [editando, setEditando] = useState<{ nombre: string; tipo: string; descripcion: string } | null>(null)
+  const [guardando, setGuardando] = useState(false)
 
   // /proyectos/abc no es un proyecto: ni se pregunta a la API.
   const idValido = Number.isInteger(id) && id > 0
@@ -60,6 +68,30 @@ export default function ProyectoDetallePage() {
   useEffect(() => {
     if (idValido) cargar()
   }, [cargar, idValido])
+
+  // Con subidas pendientes, el navegador pregunta antes de cerrar o recargar la pestaña.
+  useEffect(() => {
+    if (!subiendo) return
+    const avisar = (e: BeforeUnloadEvent) => e.preventDefault()
+    window.addEventListener('beforeunload', avisar)
+    return () => window.removeEventListener('beforeunload', avisar)
+  }, [subiendo])
+
+  async function guardar(e: SubmitEvent<HTMLFormElement>) {
+    e.preventDefault()
+    if (!editando) return
+    setGuardando(true)
+    setError('')
+    try {
+      await updateProject(id, editando)
+      setEditando(null)
+      await cargar()
+    } catch (err) {
+      setError(mensaje(err))
+    } finally {
+      setGuardando(false)
+    }
+  }
 
   /** Cambia el estado de la subida número `i` de la lista. */
   const marcar = (i: number, s: Partial<Subida>) =>
@@ -107,10 +139,38 @@ export default function ProyectoDetallePage() {
       {proyecto && (
         <>
           <h1>{proyecto.nombre}</h1>
-          <dl className="datos">
-            <dt>Tipo</dt><dd>{proyecto.tipo ?? '—'}</dd>
-            <dt>Descripción</dt><dd>{proyecto.descripcion ?? '—'}</dd>
-          </dl>
+          {editando ? (
+            <form className="fila" onSubmit={guardar} aria-label="Editar proyecto">
+              <label>
+                Nombre
+                <input value={editando.nombre} onChange={(e) => setEditando({ ...editando, nombre: e.target.value })} maxLength={100} autoFocus />
+              </label>
+              <label>
+                Tipo
+                <input value={editando.tipo} onChange={(e) => setEditando({ ...editando, tipo: e.target.value })} maxLength={100} />
+              </label>
+              <label className="ancho">
+                Descripción
+                <input value={editando.descripcion} onChange={(e) => setEditando({ ...editando, descripcion: e.target.value })} maxLength={1000} />
+              </label>
+              <button type="submit" disabled={guardando || !editando.nombre.trim()}>Guardar</button>
+              <button type="button" className="secundario" onClick={() => { setEditando(null); setError('') }}>Cancelar</button>
+            </form>
+          ) : (
+            <>
+              <dl className="datos">
+                <dt>Tipo</dt><dd>{proyecto.tipo ?? '—'}</dd>
+                <dt>Descripción</dt><dd>{proyecto.descripcion ?? '—'}</dd>
+              </dl>
+              <button
+                type="button"
+                className="secundario suelto"
+                onClick={() => setEditando({ nombre: proyecto.nombre, tipo: proyecto.tipo ?? '', descripcion: proyecto.descripcion ?? '' })}
+              >
+                Editar
+              </button>
+            </>
+          )}
 
           <h2>Documentos</h2>
           <DropZone onFiles={subir} disabled={subiendo} />
@@ -142,7 +202,7 @@ export default function ProyectoDetallePage() {
                     <td>{tamanoLegible(d.tamano)}</td>
                     <td className="acciones">
                       {d.visible && <a href={documentUrl(d.id, true)} target="_blank" rel="noopener noreferrer">Ver</a>}
-                      <a href={documentUrl(d.id, false)} download>Descargar</a>
+                      <a href={documentUrl(d.id, false)}>Descargar</a>
                       <button className="peligro" onClick={() => setBorrando(d)}>Borrar</button>
                     </td>
                   </tr>

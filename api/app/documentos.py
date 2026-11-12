@@ -64,9 +64,26 @@ def limpiar_nombre(nombre: str) -> str:
     """
     nombre = nombre.replace("\\", "/").rpartition("/")[2]
     nombre = "".join(c for c in nombre if ord(c) >= 32 and ord(c) != 127).strip()
+    # macOS manda «é» como «e» + tilde suelta (NFD) y Windows como una sola letra (NFC): sin
+    # normalizar, el mismo nombre subido desde los dos no chocaría en el índice único.
+    nombre = unicodedata.normalize("NFC", nombre)
     if not nombre or len(nombre) > NOMBRE_MAX:
         raise ValueError("Nombre de archivo vacío o de más de 255 caracteres")
     return nombre
+
+
+def charset_texto(contenido: bytes) -> str:
+    """Codificación de un documento de texto: UTF-8 si lo es; si no, Windows-1252.
+
+    El Excel y el Bloc de notas en español guardan muchas veces en Windows-1252: servirlo como
+    UTF-8 rompería las tildes al verlo en el navegador. Windows-1252 acepta casi cualquier byte,
+    así que es el último recurso.
+    """
+    try:
+        contenido.decode("utf-8")
+    except UnicodeDecodeError:
+        return "windows-1252"
+    return "utf-8"
 
 
 def content_disposition(nombre: str, inline: bool) -> str:
