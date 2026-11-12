@@ -58,6 +58,14 @@ def test_login_y_me_de_usuario_no_admin(client, fake):
     assert client.get("/api/auth/me").json() == {"username": "pepe", "es_admin": False}
 
 
+def test_renombrar_al_usuario_no_cierra_su_sesion(client, fake):
+    """La sesión guarda el id: si el administrador renombra al usuario, sigue dentro con el nombre nuevo."""
+    fake.users["pepe"] = fake.user("clave")
+    login(client, u="pepe", p="clave")
+    fake.users["jose"] = fake.users.pop("pepe")
+    assert client.get("/api/auth/me").json() == {"username": "jose", "es_admin": False}
+
+
 def test_me_de_usuario_borrado_cierra_la_sesion(client, fake):
     """Si el usuario de la sesión ya no existe, /me da 401 y la sesión se borra."""
     fake.users["pepe"] = fake.user("clave")

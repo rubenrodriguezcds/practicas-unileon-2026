@@ -65,21 +65,24 @@ def find_user(conn, username: str) -> dict | None:
     tiene que comprobar fechas.
     """
     row = conn.execute(
-        "SELECT password_hash, email, CASE WHEN reset_expira > now() THEN reset_hash END, es_admin"
+        "SELECT password_hash, email, CASE WHEN reset_expira > now() THEN reset_hash END, es_admin, id"
         " FROM usuarios WHERE username = %s",
         (username,),
     ).fetchone()
-    return {"password_hash": row[0], "email": row[1], "reset_hash": row[2], "es_admin": row[3]} if row else None
+    if row is None:
+        return None
+    return {"password_hash": row[0], "email": row[1], "reset_hash": row[2], "es_admin": row[3], "id": row[4]}
 
 
-def get_es_admin(conn, username: str) -> bool | None:
-    """Si el usuario es administrador; None si ya no existe (la sesión apunta a un usuario borrado).
+def get_session_user(conn, user_id: int) -> dict | None:
+    """Nombre y permiso de administrador del usuario de la sesión; None si ya no existe.
 
-    Se consulta en cada petición protegida, en vez de guardarlo en la cookie, para que quitar el
-    permiso en la bbdd surta efecto al momento.
+    La sesión guarda el id (no cambia aunque se renombre al usuario). Se consulta en cada
+    petición protegida, en vez de guardar es_admin en la cookie, para que quitar el permiso en la
+    bbdd surta efecto al momento.
     """
-    row = conn.execute("SELECT es_admin FROM usuarios WHERE username = %s", (username,)).fetchone()
-    return row[0] if row else None
+    row = conn.execute("SELECT username, es_admin FROM usuarios WHERE id = %s", (user_id,)).fetchone()
+    return {"id": user_id, "username": row[0], "es_admin": row[1]} if row else None
 
 
 def save_pending_password(conn, username: str, hashed: str) -> None:
@@ -145,7 +148,7 @@ def add_reset_attempt(conn, keys: list[str]) -> None:
 # --- Roles (issue #5) ---
 
 class NombreDuplicado(Exception):
-    """Ya hay un rol con ese nombre (la columna roles.nombre es única)."""
+    """El nombre ya existe: roles.nombre y usuarios.username son únicos."""
 
 
 def _rol(row) -> dict:
@@ -227,3 +230,98 @@ def role_users(conn, rol_id: int) -> list[dict] | None:
         (rol_id,),
     ).fetchall()
     return [{"id": r[0], "username": r[1], "email": r[2]} for r in rows]
+
+
+# --- Usuarios (issue #6) ---
+
+def _usuario(row) -> dict:
+    return {"id": row[0], "username": row[1], "email": row[2], "es_admin": row[3]}
+
+
+def list_users(conn) -> list[dict]:
+    """Todos los usuarios por nombre, con cuántos roles tiene cada uno."""
+    rows = conn.execute(
+        "SELECT u.id, u.username, u.email, u.es_admin, count(ur.rol_id) FROM usuarios u"
+        " LEFT JOIN usuario_roles ur ON ur.usuario_id = u.id GROUP BY u.id ORDER BY u.username"
+    ).fetchall()
+    return [{**_usuario(r), "num_roles": r[4]} for r in rows]
+
+
+def get_user(conn, user_id: int) -> dict | None:
+    """Detalle de un usuario con sus roles (por nombre); None si no existe."""
+    row = conn.execute("SELECT id, username, email, es_admin FROM usuarios WHERE id = %s", (user_id,)).fetchone()
+    if row is None:
+        return None
+    roles = conn.execute(
+        "SELECT r.id, r.nombre, r.descripcion FROM roles r JOIN usuario_roles ur ON ur.rol_id = r.id"
+        " WHERE ur.usuario_id = %s ORDER BY r.nombre",
+        (user_id,),
+    ).fetchall()
+    return {**_usuario(row), "roles": [{"id": r[0], "nombre": r[1], "descripcion": r[2]} for r in roles]}
+
+
+def create_user(conn, username: str, email: str, es_admin: bool, password_hash: str) -> dict:
+    """Crea un usuario y lo devuelve. NO hace commit.
+
+    Sin commit a propósito: el alta solo se confirma si sale el correo con la contraseña (si no,
+    rollback y el usuario no queda creado sin que nadie conozca su contraseña).
+
+    Raises:
+        NombreDuplicado: si ya existe un usuario con ese nombre.
+    """
+    try:
+        row = conn.execute(
+            "INSERT INTO usuarios (username, email, es_admin, password_hash) VALUES (%s, %s, %s, %s)"
+            " RETURNING id, username, email, es_admin",
+            (username, email, es_admin, password_hash),
+        ).fetchone()
+    except psycopg.errors.UniqueViolation:
+        conn.rollback()
+        raise NombreDuplicado from None
+    return {**_usuario(row), "num_roles": 0}
+
+
+def update_user(conn, user_id: int, username: str, email: str | None, es_admin: bool) -> dict | None:
+    """Renombra o edita un usuario y lo devuelve; None si no existe.
+
+    Raises:
+        NombreDuplicado: si el nombre nuevo ya lo tiene otro usuario.
+    """
+    try:
+        row = conn.execute(
+            "UPDATE usuarios SET username = %s, email = %s, es_admin = %s WHERE id = %s"
+            " RETURNING id, username, email, es_admin",
+            (username, email, es_admin, user_id),
+        ).fetchone()
+    except psycopg.errors.UniqueViolation:
+        conn.rollback()
+        raise NombreDuplicado from None
+    conn.commit()
+    return _usuario(row) if row else None
+
+
+def delete_users(conn, user_ids: list[int]) -> int:
+    """Borra los usuarios dados (sus roles se van con ellos: ON DELETE CASCADE). Devuelve cuántos."""
+    n = conn.execute("DELETE FROM usuarios WHERE id = ANY(%s)", (user_ids,)).rowcount
+    conn.commit()
+    return n
+
+
+def add_user_role(conn, user_id: int, rol_id: int) -> bool:
+    """Asocia un rol a un usuario (si ya lo tenía, no cambia nada). False si el usuario o el rol no existen."""
+    try:
+        conn.execute(
+            "INSERT INTO usuario_roles (usuario_id, rol_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+            (user_id, rol_id),
+        )
+    except psycopg.errors.ForeignKeyViolation:
+        conn.rollback()
+        return False
+    conn.commit()
+    return True
+
+
+def remove_user_role(conn, user_id: int, rol_id: int) -> None:
+    """Quita un rol a un usuario (si no lo tenía, no cambia nada)."""
+    conn.execute("DELETE FROM usuario_roles WHERE usuario_id = %s AND rol_id = %s", (user_id, rol_id))
+    conn.commit()
