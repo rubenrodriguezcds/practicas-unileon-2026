@@ -1,7 +1,7 @@
 """Punto de entrada de la API: construye la aplicación FastAPI.
 
 Para qué: junta las piezas en una app lista para servir: configuración, sesión por cookie,
-endpoints (/api/health, /api/auth/*, /api/captcha, /api/roles) y, si procede, el frontend compilado.
+endpoints (/api/health, /api/auth/*, /api/captcha, /api/roles, /api/usuarios) y, si procede, el frontend compilado.
 Al arrancar aplica las migraciones de la bbdd pendientes (app/migrations.py).
 
 Por qué existe: es el único sitio donde se conectan los módulos entre sí. Cada módulo nuevo
@@ -29,7 +29,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import Settings, get_settings
 from app.migrations import migrate
-from app.routers import auth, captcha, roles
+from app.routers import auth, captcha, roles, usuarios
 from app.spa import mount_spa
 
 logger = logging.getLogger(__name__)
@@ -64,6 +64,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth.router)
     app.include_router(captcha.router)
     app.include_router(roles.router)
+    app.include_router(usuarios.router)
 
     @app.get("/api/health")
     def health():
