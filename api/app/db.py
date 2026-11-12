@@ -65,21 +65,24 @@ def find_user(conn, username: str) -> dict | None:
     tiene que comprobar fechas.
     """
     row = conn.execute(
-        "SELECT password_hash, email, CASE WHEN reset_expira > now() THEN reset_hash END, es_admin"
+        "SELECT password_hash, email, CASE WHEN reset_expira > now() THEN reset_hash END, es_admin, id"
         " FROM usuarios WHERE username = %s",
         (username,),
     ).fetchone()
-    return {"password_hash": row[0], "email": row[1], "reset_hash": row[2], "es_admin": row[3]} if row else None
+    if row is None:
+        return None
+    return {"password_hash": row[0], "email": row[1], "reset_hash": row[2], "es_admin": row[3], "id": row[4]}
 
 
-def get_es_admin(conn, username: str) -> bool | None:
-    """Si el usuario es administrador; None si ya no existe (la sesión apunta a un usuario borrado).
+def get_session_user(conn, user_id: int) -> dict | None:
+    """Nombre y permiso de administrador del usuario de la sesión; None si ya no existe.
 
-    Se consulta en cada petición protegida, en vez de guardarlo en la cookie, para que quitar el
-    permiso en la bbdd surta efecto al momento.
+    La sesión guarda el id (no cambia aunque se renombre al usuario). Se consulta en cada
+    petición protegida, en vez de guardar es_admin en la cookie, para que quitar el permiso en la
+    bbdd surta efecto al momento.
     """
-    row = conn.execute("SELECT es_admin FROM usuarios WHERE username = %s", (username,)).fetchone()
-    return row[0] if row else None
+    row = conn.execute("SELECT username, es_admin FROM usuarios WHERE id = %s", (user_id,)).fetchone()
+    return {"id": user_id, "username": row[0], "es_admin": row[1]} if row else None
 
 
 def save_pending_password(conn, username: str, hashed: str) -> None:
