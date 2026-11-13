@@ -4,7 +4,8 @@ Para qué: es lo que llama el frontend (frontend/src/api/client.ts) para iniciar
 cerrarla, saber al cargar la página si ya hay una sesión abierta y pedir una contraseña nueva.
 
 Por qué existe: concentra el flujo de login en un solo sitio. Comprueba la contraseña contra
-la tabla `usuarios` de Postgres y guarda el nombre de usuario en la cookie de sesión.
+la tabla `usuarios` de Postgres y guarda el id del usuario en la cookie de sesión (el id y no el
+nombre, porque el administrador puede renombrar usuarios).
 
 Contrato (el frontend depende de él):
   POST /api/auth/login   {"username","password","altcha"} → 200 {"username","es_admin"} + cookie
@@ -106,7 +107,9 @@ def login(body: LoginIn, request: Request, conn=Depends(get_conn)):
         db.promote_pending_password(conn, body.username)
     else:
         raise HTTPException(401, "Usuario o contraseña incorrectos")
-    request.session["username"] = body.username
+    # El id y no el nombre: el administrador puede renombrar usuarios (#6) y el id no cambia.
+    request.session.clear()
+    request.session["user_id"] = user["id"]
     return {"username": body.username, "es_admin": user["es_admin"]}
 
 
@@ -127,8 +130,8 @@ def me(request: Request, conn=Depends(get_conn)):
     Raises:
         HTTPException: 401 si no hay sesión iniciada o su usuario ya no existe.
     """
-    username, es_admin = current_user(request, conn)
-    return {"username": username, "es_admin": es_admin}
+    user = current_user(request, conn)
+    return {"username": user["username"], "es_admin": user["es_admin"]}
 
 
 @router.post("/reset", status_code=202)

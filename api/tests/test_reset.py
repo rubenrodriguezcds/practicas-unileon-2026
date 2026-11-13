@@ -29,7 +29,7 @@ from tests.factories import FakeDB, make_settings, solve_captcha
 def fake():
     """Bbdd en memoria: admin/secreto con email, y «sinmail» sin email."""
     f = FakeDB()
-    f.users["sinmail"] = FakeDB.user("otra")
+    f.users["sinmail"] = f.user("otra")
     return f
 
 

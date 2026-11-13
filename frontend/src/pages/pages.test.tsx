@@ -5,8 +5,8 @@
  * desactivado con campos vacíos o sin captcha, el captcha se envía y se reinicia tras un fallo,
  * el logo solo en las pantallas sin sesión, el enlace al reseteo, saludo y cierre de sesión en
  * orden (primero el servidor, luego la pantalla), que los errores de la bbdd se muestran y no
- * se arrastran tras un login correcto, y que la entrada «Roles» y la ruta /roles son solo para
- * el administrador.
+ * se arrastran tras un login correcto, y que las entradas «Usuarios» y «Roles» y sus rutas son
+ * solo para el administrador.
  *
  * El cliente de API se simula (vi.mock), así que no hace falta backend. El captcha real (un web
  * component que pide retos a la API) se sustituye por un botón «Resolver captcha» que entrega
@@ -19,7 +19,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import App from '../App'
-import { ApiError, listProjects, listRoles, login, logout, me, resetPassword } from '../api/client'
+import { ApiError, listProjects, listRoles, listUsers, login, logout, me, resetPassword } from '../api/client'
 import Layout from '../components/Layout'
 import Home from './Home'
 import Login from './Login'
@@ -33,6 +33,7 @@ vi.mock('../api/client', async (orig) => ({
   resetPassword: vi.fn(),
   listRoles: vi.fn(),
   listProjects: vi.fn(),
+  listUsers: vi.fn(),
 }))
 
 // Cada montaje del captcha falso = un reto nuevo (captcha-1, captcha-2…).
@@ -166,16 +167,24 @@ describe('Layout (menú)', () => {
     expect(onLogout).not.toHaveBeenCalled()
   })
 
-  it('el administrador ve la entrada «Roles»', () => {
+  it('el administrador ve las entradas «Usuarios» y «Roles»', () => {
     inRouter(<Layout user={ADMIN} onLogout={vi.fn()} />)
+    expect(screen.getByRole('link', { name: 'Usuarios' })).toHaveAttribute('href', '/usuarios')
     expect(screen.getByRole('link', { name: 'Roles' })).toHaveAttribute('href', '/roles')
     expect(screen.getByText('admin')).toBeInTheDocument()
   })
 
-  it('un usuario normal no ve la entrada «Roles»', () => {
+  it('un usuario normal no ve «Usuarios» ni «Roles»', () => {
     inRouter(<Layout user={PEPE} onLogout={vi.fn()} />)
     expect(screen.getByRole('link', { name: 'Inicio' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Usuarios' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Roles' })).not.toBeInTheDocument()
+  })
+
+  it('«Usuarios» sigue marcado en el detalle de un usuario', () => {
+    inRouter(<Layout user={ADMIN} onLogout={vi.fn()} />, '/usuarios/5')
+    expect(screen.getByRole('link', { name: 'Usuarios' })).toHaveClass('active')
+    expect(screen.getByRole('link', { name: 'Inicio' })).not.toHaveClass('active')
   })
 
   it('la entrada «Proyectos» solo la ve el administrador', () => {
@@ -242,6 +251,21 @@ describe('App', () => {
     inRouter(<App />, '/roles')
     expect(await screen.findByText('Hola, pepe')).toBeInTheDocument()
     expect(listRoles).not.toHaveBeenCalled()
+  })
+
+  it('el administrador llega a /usuarios desde el menú', async () => {
+    vi.mocked(me).mockResolvedValue(ADMIN)
+    vi.mocked(listUsers).mockResolvedValue([])
+    inRouter(<App />)
+    await userEvent.click(await screen.findByRole('link', { name: 'Usuarios' }))
+    expect(await screen.findByRole('heading', { name: 'Usuarios' })).toBeInTheDocument()
+  })
+
+  it('un usuario normal que escribe /usuarios a mano vuelve a la home', async () => {
+    vi.mocked(me).mockResolvedValue(PEPE)
+    inRouter(<App />, '/usuarios/1')
+    expect(await screen.findByText('Hola, pepe')).toBeInTheDocument()
+    expect(listUsers).not.toHaveBeenCalled()
   })
 
   it('sin sesión, /roles lleva al login', async () => {

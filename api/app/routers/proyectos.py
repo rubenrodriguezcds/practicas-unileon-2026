@@ -47,7 +47,7 @@ from app.deps import require_admin
 from app.documentos import charset_texto, content_disposition, limpiar_nombre, tipo_de
 
 
-def admin_o_login(request: Request, conn=Depends(get_conn)) -> str:
+def admin_o_login(request: Request, conn=Depends(get_conn)) -> dict:
     """`require_admin`, pero un enlace del navegador sin sesión va al login en vez de a un JSON de error.
 
     «Ver» y «Descargar» son enlaces normales: con la sesión caducada, el navegador enseñaría (o

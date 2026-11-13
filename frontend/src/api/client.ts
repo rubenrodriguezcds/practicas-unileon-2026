@@ -1,7 +1,7 @@
 /**
  * Cliente de la API: el ÚNICO fichero del frontend que hace peticiones al backend.
  *
- * Para qué: ofrece funciones simples (login, logout, me, resetPassword y las de roles) que las pantallas llaman sin saber nada
+ * Para qué: ofrece funciones simples (login, logout, me, resetPassword y las de roles y usuarios) que las pantallas llaman sin saber nada
  * de fetch, URLs ni códigos HTTP. Los errores llegan como ApiError con el mensaje del backend,
  * listo para enseñarlo al usuario.
  *
@@ -143,6 +143,82 @@ export async function deleteRole(id: number): Promise<void> {
 /** Usuarios que tienen el rol (GET /api/roles/{id}/usuarios). */
 export async function roleUsers(id: number): Promise<UsuarioDeRol[]> {
   return (await request(`/api/roles/${id}/usuarios`)).json()
+}
+
+// --- Usuarios (issue #6). Solo para el administrador: la API responde 403 a cualquier otro. ---
+
+/** Usuario del listado; `num_roles` es cuántos roles tiene. */
+export type Usuario = { id: number; username: string; email: string | null; es_admin: boolean; num_roles: number }
+
+/** Detalle de un usuario con sus roles. */
+export type UsuarioDetalle = {
+  id: number
+  username: string
+  email: string | null
+  es_admin: boolean
+  roles: { id: number; nombre: string; descripcion: string | null }[]
+}
+
+/** Todos los usuarios, por nombre (GET /api/usuarios). */
+export async function listUsers(): Promise<Usuario[]> {
+  return (await request('/api/usuarios')).json()
+}
+
+/**
+ * Detalle de un usuario con sus roles (GET /api/usuarios/{id}).
+ * @throws {ApiError} 404 si no existe.
+ */
+export async function getUser(id: number): Promise<UsuarioDetalle> {
+  return (await request(`/api/usuarios/${id}`)).json()
+}
+
+/**
+ * Crea un usuario; la API le envía por correo una contraseña generada (POST /api/usuarios).
+ * @throws {ApiError} 409 nombre repetido; 422 datos no válidos; 502 si el correo no sale (no se crea).
+ */
+export async function createUser(username: string, email: string, es_admin: boolean): Promise<Usuario> {
+  const res = await request('/api/usuarios', { method: 'POST', body: JSON.stringify({ username, email, es_admin }) })
+  return res.json()
+}
+
+/**
+ * Renombra o edita un usuario (PUT /api/usuarios/{id}). Un email vacío lo deja sin email.
+ * @throws {ApiError} 404; 409 nombre repetido o quitarse a sí mismo el permiso de administrador.
+ */
+export async function updateUser(id: number, username: string, email: string, es_admin: boolean): Promise<Usuario> {
+  const res = await request(`/api/usuarios/${id}`, { method: 'PUT', body: JSON.stringify({ username, email, es_admin }) })
+  return res.json()
+}
+
+/**
+ * Borra un usuario (DELETE /api/usuarios/{id}).
+ * @throws {ApiError} 404; 409 si es uno mismo.
+ */
+export async function deleteUser(id: number): Promise<void> {
+  await request(`/api/usuarios/${id}`, { method: 'DELETE' })
+}
+
+/**
+ * Borra varios usuarios (POST /api/usuarios/borrar).
+ * @returns cuántos se han borrado.
+ * @throws {ApiError} 409 si la lista incluye a uno mismo (no se borra ninguno).
+ */
+export async function deleteUsers(ids: number[]): Promise<{ borrados: number }> {
+  const res = await request('/api/usuarios/borrar', { method: 'POST', body: JSON.stringify({ ids }) })
+  return res.json()
+}
+
+/**
+ * Da un rol a un usuario (PUT /api/usuarios/{id}/roles/{rolId}).
+ * @throws {ApiError} 404 si el usuario o el rol no existen.
+ */
+export async function addUserRole(id: number, rolId: number): Promise<void> {
+  await request(`/api/usuarios/${id}/roles/${rolId}`, { method: 'PUT' })
+}
+
+/** Quita un rol a un usuario (DELETE /api/usuarios/{id}/roles/{rolId}). */
+export async function removeUserRole(id: number, rolId: number): Promise<void> {
+  await request(`/api/usuarios/${id}/roles/${rolId}`, { method: 'DELETE' })
 }
 
 // --- Proyectos y documentos (issue #7). Solo para el administrador: la API responde 403 a cualquier otro. ---

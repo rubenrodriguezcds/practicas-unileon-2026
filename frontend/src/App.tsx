@@ -2,8 +2,9 @@
  * Componente raíz: decide qué pantalla ve el usuario según tenga o no sesión.
  *
  * Para qué: define las rutas (/login → Login, /reset-password → ResetPassword, / → Home,
- * /roles → Roles) y hace de «guardia»: al cargar la página pregunta a la API (/api/auth/me) si ya
- * hay sesión, y redirige a /login o a / según la respuesta. Las pantallas con sesión van dentro de
+ * /roles → Roles, /usuarios → Usuarios, /usuarios/:id → UsuarioDetalle) y hace de «guardia»: al
+ * cargar la página pregunta a la API (/api/auth/me) si ya hay sesión, y redirige a /login o a /
+ * según la respuesta. Las pantallas con sesión van dentro de
  * Layout (menú superior).
  *
  * Por qué existe: la sesión vive en una cookie HttpOnly que el JavaScript no puede leer, así que
@@ -13,8 +14,8 @@
  * src/api/client.ts.
  *
  * Notas: si /me falla por algo distinto de «no hay sesión» (p. ej. 503, bbdd caída) el mensaje
- * se muestra en el login en vez de tragárselo. /roles redirige a / si el usuario no es admin;
- * es solo comodidad: la API responde 403 de todos modos.
+ * se muestra en el login en vez de tragárselo. /roles y /usuarios redirigen a / si el usuario no
+ * es admin; es solo comodidad: la API responde 403 de todos modos.
  * Issue #7: /proyectos → Proyectos y /proyectos/:id → ProyectoDetalle, también solo para admin.
  */
 
@@ -28,6 +29,8 @@ import ResetPassword from './pages/ResetPassword'
 import Roles from './pages/Roles'
 import Proyectos from './pages/Proyectos'
 import ProyectoDetalle from './pages/ProyectoDetalle'
+import UsuarioDetalle from './pages/UsuarioDetalle'
+import Usuarios from './pages/Usuarios'
 
 /**
  * Componente raíz: guarda la sesión y decide qué pantalla mostrar.
@@ -50,6 +53,11 @@ export default function App() {
       .finally(() => setLoading(false))
   }, [])
 
+  /** Vuelve a leer la sesión (p. ej. si el administrador se ha renombrado a sí mismo). */
+  function refrescar() {
+    me().then((u) => setUser(u)).catch(() => {})
+  }
+
   if (loading) return null
 
   return (
@@ -59,6 +67,8 @@ export default function App() {
       <Route element={user ? <Layout user={user} onLogout={() => setUser(null)} /> : <Navigate to="/login" replace />}>
         <Route path="/" element={user && <Home username={user.username} />} />
         <Route path="/roles" element={user?.es_admin ? <Roles /> : <Navigate to="/" replace />} />
+        <Route path="/usuarios" element={user?.es_admin ? <Usuarios yo={user.username} /> : <Navigate to="/" replace />} />
+        <Route path="/usuarios/:id" element={user?.es_admin ? <UsuarioDetalle yo={user.username} onCambio={refrescar} /> : <Navigate to="/" replace />} />
         <Route path="/proyectos" element={user?.es_admin ? <Proyectos /> : <Navigate to="/" replace />} />
         <Route path="/proyectos/:id" element={user?.es_admin ? <ProyectoDetalle /> : <Navigate to="/" replace />} />
       </Route>

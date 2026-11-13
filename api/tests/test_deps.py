@@ -31,8 +31,8 @@ def client(fake, monkeypatch):
     app = create_app(make_settings())
 
     @app.get("/api/solo-admin")
-    def solo_admin(username: str = Depends(require_admin)):
-        return {"username": username}
+    def solo_admin(me: dict = Depends(require_admin)):
+        return {"username": me["username"]}
 
     conn = fake.install(monkeypatch)
     app.dependency_overrides[db.get_conn] = lambda: conn

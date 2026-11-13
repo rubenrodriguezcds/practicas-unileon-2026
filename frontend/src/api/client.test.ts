@@ -9,8 +9,9 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  ApiError, createProject, createRole, deleteDocument, deleteProject, deleteRole, documentUrl, getProject,
-  listProjects, listRoles, login, me, resetPassword, roleUsers, updateProject, updateRole, uploadDocument,
+  ApiError, addUserRole, createProject, createRole, createUser, deleteDocument, deleteProject, deleteRole,
+  deleteUser, deleteUsers, documentUrl, getProject, getUser, listProjects, listRoles, listUsers, login, me,
+  removeUserRole, resetPassword, roleUsers, updateProject, updateRole, updateUser, uploadDocument,
 } from './client'
 
 // Crea un `fetch` simulado que responde con el status y el cuerpo JSON dados.
@@ -121,6 +122,78 @@ describe('client: roles', () => {
     vi.stubGlobal('fetch', fetchMock)
     await expect(roleUsers(3)).resolves.toEqual([])
     expect(fetchMock.mock.calls[0][0]).toBe('/api/roles/3/usuarios')
+  })
+})
+
+describe('client: usuarios', () => {
+  const U = { id: 2, username: 'pepe', email: 'p@example.com', es_admin: false, num_roles: 0 }
+
+  it('listUsers hace GET /api/usuarios', async () => {
+    const fetchMock = reply(200, [U])
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(listUsers()).resolves.toEqual([U])
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/usuarios')
+  })
+
+  it('getUser hace GET /api/usuarios/{id}', async () => {
+    const fetchMock = reply(200, { ...U, roles: [] })
+    vi.stubGlobal('fetch', fetchMock)
+    await getUser(2)
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/usuarios/2')
+  })
+
+  it('createUser hace POST con usuario, email y es_admin', async () => {
+    const fetchMock = reply(201, U)
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(createUser('pepe', 'p@example.com', true)).resolves.toEqual(U)
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/usuarios')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body)).toEqual({ username: 'pepe', email: 'p@example.com', es_admin: true })
+  })
+
+  it('createUser con 502 lanza ApiError con el detail', async () => {
+    vi.stubGlobal('fetch', reply(502, { detail: 'No se ha podido enviar el correo' }))
+    const err = await createUser('a', 'a@example.com', false).catch((e) => e)
+    expect(err).toBeInstanceOf(ApiError)
+    expect(err.status).toBe(502)
+  })
+
+  it('updateUser hace PUT /api/usuarios/{id}', async () => {
+    const fetchMock = reply(200, U)
+    vi.stubGlobal('fetch', fetchMock)
+    await updateUser(2, 'jose', '', false)
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/usuarios/2')
+    expect(init.method).toBe('PUT')
+    expect(JSON.parse(init.body)).toEqual({ username: 'jose', email: '', es_admin: false })
+  })
+
+  it('deleteUser hace DELETE y acepta el 204', async () => {
+    const fetchMock = reply(204)
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(deleteUser(2)).resolves.toBeUndefined()
+    expect(fetchMock.mock.calls[0][1].method).toBe('DELETE')
+  })
+
+  it('deleteUsers hace POST /api/usuarios/borrar con los ids', async () => {
+    const fetchMock = reply(200, { borrados: 2 })
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(deleteUsers([2, 3])).resolves.toEqual({ borrados: 2 })
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/usuarios/borrar')
+    expect(JSON.parse(init.body)).toEqual({ ids: [2, 3] })
+  })
+
+  it('addUserRole hace PUT y removeUserRole DELETE sobre /api/usuarios/{id}/roles/{rolId}', async () => {
+    const fetchMock = reply(204)
+    vi.stubGlobal('fetch', fetchMock)
+    await addUserRole(2, 10)
+    await removeUserRole(2, 10)
+    expect(fetchMock.mock.calls.map((c) => [c[0], c[1].method])).toEqual([
+      ['/api/usuarios/2/roles/10', 'PUT'],
+      ['/api/usuarios/2/roles/10', 'DELETE'],
+    ])
   })
 })
 

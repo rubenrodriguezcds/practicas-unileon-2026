@@ -1,8 +1,8 @@
 /**
  * Marco común de las pantallas con sesión: menú superior y, debajo, la pantalla de cada ruta.
  *
- * Para qué: el menú de navegación de la aplicación. Tiene «Inicio», «Roles» (solo para el
- * administrador), el nombre del usuario y «Cerrar sesión».
+ * Para qué: el menú de navegación de la aplicación. Tiene «Inicio», «Usuarios» y «Roles» (solo para
+ * el administrador), el nombre del usuario y «Cerrar sesión».
  *
  * Por qué existe: la issue #5 pide una entrada de menú para gestionar roles y hasta ahora no había
  * menú. Las próximas pantallas (usuarios, proyectos…) se añaden con una línea en `ENTRADAS`.
@@ -23,6 +23,7 @@ import { logout, type User } from '../api/client'
 /** Entradas del menú. `soloAdmin` las esconde a quien no es administrador. */
 const ENTRADAS = [
   { to: '/', texto: 'Inicio', soloAdmin: false },
+  { to: '/usuarios', texto: 'Usuarios', soloAdmin: true },
   { to: '/roles', texto: 'Roles', soloAdmin: true },
   { to: '/proyectos', texto: 'Proyectos', soloAdmin: true },
 ]
@@ -51,7 +52,8 @@ export default function Layout({ user, onLogout }: { user: User; onLogout: () =>
       <nav className="menu" aria-label="Menú principal">
         <ul>
           {ENTRADAS.filter((e) => !e.soloAdmin || user.es_admin).map((e) => (
-            <li key={e.to}><NavLink to={e.to} end>{e.texto}</NavLink></li>
+            // `end` solo en Inicio: así «Usuarios» sigue marcado también en /usuarios/5
+            <li key={e.to}><NavLink to={e.to} end={e.to === '/'}>{e.texto}</NavLink></li>
           ))}
         </ul>
         <span className="usuario">{user.username}</span>

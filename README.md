@@ -26,6 +26,9 @@
 >
 > **Issue #5:** menú de la aplicación y gestión de roles, solo para el administrador.
 >
+> **Issue #6:** gestión de usuarios (alta con contraseña por correo, edición, borrado en lote y
+> sus roles), solo para el administrador.
+>
 > **Issue #7:** gestión de proyectos y de sus documentos adjuntos, solo para el administrador.
 
 ## Arquitectura
@@ -130,6 +133,7 @@ python -c "import secrets;print(secrets.token_hex(32))"
 |---|---|
 | Aplicación web | http://localhost/login |
 | Recuperar contraseña | http://localhost/reset-password (o «¿Olvidaste tu contraseña?» en el login) |
+| Gestión de usuarios (solo administrador) | http://localhost/usuarios (o «Usuarios» en el menú) |
 | Gestión de roles (solo administrador) | http://localhost/roles (o «Roles» en el menú) |
 | Gestión de proyectos y documentos (solo administrador) | http://localhost/proyectos (o «Proyectos» en el menú) |
 | Estado de la API | http://localhost/api/health |
@@ -160,6 +164,19 @@ python -c "import secrets;print(secrets.token_hex(32))"
 | ![PUT](https://img.shields.io/badge/PUT-fca130?style=flat-square) | `/api/roles/{id}` `{"nombre","descripcion"}` | 200 rol editado · 404 · 409 nombre repetido |
 | ![DELETE](https://img.shields.io/badge/DELETE-f93e3e?style=flat-square) | `/api/roles/{id}` | 204 · 404 · 409 si algún usuario tiene el rol |
 | ![GET](https://img.shields.io/badge/GET-61affe?style=flat-square) | `/api/roles/{id}/usuarios` | 200 usuarios que tienen el rol · 404 |
+
+**Usuarios** (solo administrador: 401 sin sesión, **403** si el usuario no es administrador):
+
+| Método | Ruta | Respuesta |
+|---|---|---|
+| ![GET](https://img.shields.io/badge/GET-61affe?style=flat-square) | `/api/usuarios` | 200 lista de usuarios por nombre, con `num_roles` |
+| ![GET](https://img.shields.io/badge/GET-61affe?style=flat-square) | `/api/usuarios/{id}` | 200 usuario con sus `roles` · 404 |
+| ![POST](https://img.shields.io/badge/POST-49cc90?style=flat-square) | `/api/usuarios` `{"username","email","es_admin"}` | 201 usuario (la contraseña le llega por correo) · 409 nombre repetido · 502 no salió el correo (no se crea) |
+| ![PUT](https://img.shields.io/badge/PUT-fca130?style=flat-square) | `/api/usuarios/{id}` `{"username","email","es_admin"}` | 200 usuario · 404 · 409 nombre repetido o quitarse el propio permiso |
+| ![DELETE](https://img.shields.io/badge/DELETE-f93e3e?style=flat-square) | `/api/usuarios/{id}` | 204 · 404 · 409 si es uno mismo |
+| ![POST](https://img.shields.io/badge/POST-49cc90?style=flat-square) | `/api/usuarios/borrar` `{"ids"}` | 200 `{"borrados"}` · 409 si incluye a uno mismo (no borra ninguno) |
+| ![PUT](https://img.shields.io/badge/PUT-fca130?style=flat-square) | `/api/usuarios/{id}/roles/{rol_id}` | 204 asocia el rol · 404 usuario o rol inexistente |
+| ![DELETE](https://img.shields.io/badge/DELETE-f93e3e?style=flat-square) | `/api/usuarios/{id}/roles/{rol_id}` | 204 quita el rol |
 
 **Proyectos y documentos** (solo administrador: 401 sin sesión, **403** si el usuario no es administrador):
 
@@ -240,8 +257,25 @@ Por qué así:
 - **El nombre del rol es único**: dos roles con el mismo nombre serían indistinguibles.
 - **Un rol que tienen usuarios no se puede borrar** (409, indicando cuántos): borrarlo les quitaría
   el rol sin avisar. La bbdd también lo impide (`ON DELETE RESTRICT`).
-- **Asignar roles a usuarios** todavía no tiene pantalla (la issue solo pide ver quién los tiene):
-  ver «¿Cómo asigno un rol a un usuario?» en Problemas frecuentes.
+- **Los roles se asignan** desde el detalle de cada usuario, en http://localhost/usuarios.
+
+</details>
+
+<details>
+<summary><b>Gestión de usuarios: cómo funciona y por qué así</b></summary>
+
+- **Contraseña del usuario nuevo**: la genera la API al azar y se la envía al email del usuario
+  (con el mismo correo que el reseteo). El administrador nunca la conoce; por eso el email es
+  obligatorio al crear. **Si el correo no sale, el usuario no se crea** (502) y el administrador lo
+  ve al momento.
+- **El administrador no puede borrarse a sí mismo ni quitarse su propio permiso.** Como quien hace
+  los cambios siempre es un administrador, así siempre queda al menos uno.
+- **Borrado en lote todo o nada respecto a uno mismo**: si la selección te incluye, no se borra
+  ninguno. Borrar un usuario borra también sus roles asignados.
+- **La sesión guarda el id del usuario**, no su nombre: así renombrar a alguien (o a uno mismo) no
+  le cierra la sesión.
+- **Nombre de usuario**: 1–50 caracteres, solo letras, números y `. _ -` (se escribe al iniciar
+  sesión).
 
 </details>
 
@@ -300,12 +334,13 @@ api/                      Backend FastAPI
   app/db.py               Conexión a Postgres y consultas
   app/migrations.py       Aplica las migraciones pendientes al arrancar
   app/security.py         Hash y verificación de contraseñas
-  app/deps.py             Permisos: exige sesión de administrador
+  app/deps.py             Permisos: usuario de la sesión y exigir administrador
   app/captcha.py          Retos y verificación del captcha ALTCHA
   app/mailer.py           Envío de correo (SMTP o log)
   app/routers/auth.py     Login, logout, sesión y reseteo de contraseña
   app/routers/captcha.py  Entrega retos del captcha
   app/routers/roles.py    Gestión de roles (solo administrador)
+  app/routers/usuarios.py Gestión de usuarios y de sus roles (solo administrador)
   app/routers/proyectos.py  Gestión de proyectos y documentos (solo administrador)
   app/documentos.py       Tipos de archivo permitidos y nombres de los documentos
   app/spa.py              Sirve el frontend compilado
@@ -314,7 +349,7 @@ api/                      Backend FastAPI
   tests/
 frontend/                 Frontend React + Vite + TypeScript
   src/api/client.ts       Único punto de llamada a la API
-  src/pages/              Login, ResetPassword, Home y Roles
+  src/pages/              Login, ResetPassword, Home, Roles, Usuarios y UsuarioDetalle
                           Proyectos y ProyectoDetalle (gestión de proyectos y documentos)
   src/components/         Captcha, Logo y Layout (menú de las pantallas con sesión)
                           ConfirmDialog (aviso antes de borrar) y DropZone (arrastrar archivos)
@@ -434,27 +469,31 @@ cambiar el esquema sin borrar datos, añade una migración en `api/migrations/`.
 <details>
 <summary><b>¿Cómo asigno un rol a un usuario, o hago administrador a otro?</b></summary>
 
-De momento no hay pantalla para esto (la gestión de usuarios es otra issue). Desde `psql`
-(`docker compose exec db psql -U gestor -d gestor`):
-
-```sql
--- Dar el rol 'Tutor' al usuario 'pepe' (el rol se crea antes en http://localhost/roles)
-INSERT INTO usuario_roles (usuario_id, rol_id)
-SELECT u.id, r.id FROM usuarios u, roles r WHERE u.username = 'pepe' AND r.nombre = 'Tutor';
-
--- Quitárselo
-DELETE FROM usuario_roles
-WHERE usuario_id = (SELECT id FROM usuarios WHERE username = 'pepe')
-  AND rol_id = (SELECT id FROM roles WHERE nombre = 'Tutor');
-
--- Hacer administrador a 'pepe' (o quitárselo con false)
-UPDATE usuarios SET es_admin = true WHERE username = 'pepe';
-```
+Desde http://localhost/usuarios: pulsa el usuario y, en su detalle, marca «Administrador» y
+guarda, o añade y quita roles en la tabla «Roles». El rol se crea antes en http://localhost/roles.
 
 </details>
 
 <details>
-<summary><b>No veo «Roles» en el menú</b></summary>
+<summary><b>He creado un usuario y no le llega la contraseña</b></summary>
+
+- Si el correo falla, el usuario **no se crea** y la pantalla lo dice; el motivo está en
+  `docker compose logs web --tail 30`. Revisa también la carpeta de spam.
+- Sin `SMTP_HOST` en el `.env`, el correo (con la contraseña) se escribe en `docker compose logs web`.
+- Si el usuario ya existe y perdió la contraseña, puede pedir otra en «¿Olvidaste tu contraseña?».
+
+</details>
+
+<details>
+<summary><b>Tras actualizar me pide iniciar sesión otra vez</b></summary>
+
+Es normal una vez: desde la issue #6 la sesión guarda el id del usuario en vez del nombre, y las
+sesiones antiguas dejan de valer.
+
+</details>
+
+<details>
+<summary><b>No veo «Usuarios» ni «Roles» en el menú</b></summary>
 
 Solo aparece al administrador (`usuarios.es_admin = true`). Si acabas de cambiarlo en la bbdd,
 recarga la página.
@@ -466,5 +505,5 @@ recarga la página.
 | Persona | Parte |
 |---|---|
 | Sergio Martínez | Contenedor web (API y frontend) |
-| Mario Costello | Contenedor de base de datos, docker-compose y gestión de roles |
+| Mario Costello | Contenedor de base de datos, docker-compose, gestión de roles y de usuarios |
 | Rubén Rodriguez | Tutor |
