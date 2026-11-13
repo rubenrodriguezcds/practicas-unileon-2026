@@ -79,3 +79,13 @@ def test_migracion_002_es_idempotente():
         code = "\n".join(line for line in s.splitlines() if not line.strip().startswith("--")).strip()
         if code.startswith(("CREATE", "ALTER")):
             assert "IF NOT EXISTS" in code, code
+
+
+def test_migracion_004_es_idempotente():
+    sql = (MIGRATIONS_DIR / "004_proyectos.sql").read_text(encoding="utf-8")
+    for s in sql.split(";"):
+        code = "\n".join(line for line in s.splitlines() if not line.strip().startswith("--")).strip()
+        if code.startswith(("CREATE", "ALTER")):
+            assert "IF NOT EXISTS" in code, code
+    # El borrado de un proyecto arrastra sus documentos, y el contenido es binario (BYTEA).
+    assert "ON DELETE CASCADE" in sql and "BYTEA" in sql

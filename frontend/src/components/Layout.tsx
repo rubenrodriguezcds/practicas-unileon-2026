@@ -25,6 +25,7 @@ const ENTRADAS = [
   { to: '/', texto: 'Inicio', soloAdmin: false },
   { to: '/usuarios', texto: 'Usuarios', soloAdmin: true },
   { to: '/roles', texto: 'Roles', soloAdmin: true },
+  { to: '/proyectos', texto: 'Proyectos', soloAdmin: true },
 ]
 
 /**

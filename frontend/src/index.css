@@ -69,3 +69,25 @@ select { padding: 0.55rem; border: 1px solid #9ca3af; border-radius: 0.375rem; f
 .barra-acciones { display: flex; justify-content: flex-end; gap: 0.5rem; }
 .pagina > a { align-self: flex-start; color: #2563eb; font-size: 0.9rem; }
 td a { color: #2563eb; }
+
+/* --- Zona de arrastrar archivos (components/DropZone.tsx) y aviso modal (components/ConfirmDialog.tsx) --- */
+.dropzone { display: flex; flex-direction: column; align-items: center; gap: 0.75rem; padding: 1.5rem; border: 2px dashed #9ca3af; border-radius: 0.75rem; background: #f9fafb; color: #4b5563; }
+.dropzone p { margin: 0; }
+.dropzone.encima { border-color: #2563eb; background: #eff6ff; color: #1d4ed8; }
+dialog { max-width: 24rem; padding: 1.5rem; border: 0; border-radius: 0.75rem; box-shadow: 0 8px 32px rgb(0 0 0 / 0.25); color: #1f2937; }
+dialog::backdrop { background: rgb(0 0 0 / 0.4); }
+dialog h2 { margin: 0 0 0.75rem; font-size: 1.15rem; }
+dialog p { margin: 0 0 1.25rem; }
+dialog .botones { display: flex; justify-content: flex-end; gap: 0.5rem; }
+
+/* --- Detalle de un proyecto (pages/ProyectoDetalle.tsx) --- */
+.datos { display: grid; grid-template-columns: max-content 1fr; gap: 0.35rem 1rem; margin: 0; }
+.datos dt { color: #4b5563; font-weight: 600; }
+.datos dd { margin: 0; }
+.subidas { display: flex; flex-direction: column; gap: 0.35rem; margin: 0; padding: 0; list-style: none; font-size: 0.9rem; }
+.subidas li { display: flex; justify-content: space-between; gap: 1rem; padding: 0.4rem 0.6rem; border-radius: 0.375rem; background: #f3f4f6; }
+.subidas li.subido { background: #ecfdf5; color: #047857; }
+.subidas li.error { background: #fef2f2; color: #b91c1c; }
+td.acciones a { align-self: center; font-size: 0.9rem; }
+/* Botón suelto dentro de .pagina (columna flex): a su tamaño, no a todo el ancho. */
+.pagina > button.suelto { align-self: flex-start; }

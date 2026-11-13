@@ -9,8 +9,9 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  ApiError, addUserRole, createRole, createUser, deleteRole, deleteUser, deleteUsers, getUser, listRoles, listUsers, login, me,
-  removeUserRole, resetPassword, roleUsers, updateRole, updateUser,
+  ApiError, addUserRole, createProject, createRole, createUser, deleteDocument, deleteProject, deleteRole,
+  deleteUser, deleteUsers, documentUrl, getProject, getUser, listProjects, listRoles, listUsers, login, me,
+  removeUserRole, resetPassword, roleUsers, updateProject, updateRole, updateUser, uploadDocument,
 } from './client'
 
 // Crea un `fetch` simulado que responde con el status y el cuerpo JSON dados.
@@ -193,5 +194,84 @@ describe('client: usuarios', () => {
       ['/api/usuarios/2/roles/10', 'PUT'],
       ['/api/usuarios/2/roles/10', 'DELETE'],
     ])
+  })
+})
+
+describe('client: proyectos y documentos', () => {
+  const PROYECTO = { id: 2, nombre: 'Web', tipo: null, descripcion: null, num_documentos: 0 }
+
+  it('listProjects hace GET /api/proyectos', async () => {
+    const fetchMock = reply(200, [PROYECTO])
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(listProjects()).resolves.toEqual([PROYECTO])
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/proyectos')
+  })
+
+  it('createProject manda nombre, tipo y descripción como JSON', async () => {
+    const fetchMock = reply(201, PROYECTO)
+    vi.stubGlobal('fetch', fetchMock)
+    await createProject({ nombre: 'Web', tipo: '', descripcion: '' })
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/proyectos')
+    expect(init.method).toBe('POST')
+    expect(init.headers['Content-Type']).toBe('application/json')
+    expect(JSON.parse(init.body)).toEqual({ nombre: 'Web', tipo: '', descripcion: '' })
+  })
+
+  it('updateProject manda nombre, tipo y descripción con PUT', async () => {
+    const fetchMock = reply(200, PROYECTO)
+    vi.stubGlobal('fetch', fetchMock)
+    await updateProject(1, { nombre: 'Web', tipo: 'Interno', descripcion: '' })
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/proyectos/1')
+    expect(init.method).toBe('PUT')
+    expect(JSON.parse(init.body)).toEqual({ nombre: 'Web', tipo: 'Interno', descripcion: '' })
+  })
+
+  it('createProject con 409 lanza ApiError con el detail', async () => {
+    vi.stubGlobal('fetch', reply(409, { detail: 'Ya existe un proyecto con ese nombre' }))
+    const err = await createProject({ nombre: 'Web', tipo: '', descripcion: '' }).catch((e) => e)
+    expect(err).toBeInstanceOf(ApiError)
+    expect(err.status).toBe(409)
+    expect(err.message).toBe('Ya existe un proyecto con ese nombre')
+  })
+
+  it('getProject hace GET /api/proyectos/{id}', async () => {
+    const detalle = { id: 2, nombre: 'Web', tipo: null, descripcion: null, documentos: [] }
+    const fetchMock = reply(200, detalle)
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(getProject(2)).resolves.toEqual(detalle)
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/proyectos/2')
+  })
+
+  it('deleteProject y deleteDocument hacen DELETE y aceptan el 204', async () => {
+    const fetchMock = reply(204)
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(deleteProject(2)).resolves.toBeUndefined()
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/proyectos/2')
+    expect(fetchMock.mock.calls[0][1].method).toBe('DELETE')
+    fetchMock.mockResolvedValue(new Response(null, { status: 204 }))
+    await expect(deleteDocument(7)).resolves.toBeUndefined()
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/documentos/7')
+    expect(fetchMock.mock.calls[1][1].method).toBe('DELETE')
+  })
+
+  it('uploadDocument envía FormData con el archivo y sin Content-Type', async () => {
+    const doc = { id: 9, nombre: 'a.pdf', tamano: 3, visible: false }
+    const fetchMock = reply(201, doc)
+    vi.stubGlobal('fetch', fetchMock)
+    const file = new File(['abc'], 'a.pdf', { type: 'application/pdf' })
+    await expect(uploadDocument(3, file)).resolves.toEqual(doc)
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/proyectos/3/documentos')
+    expect(init.method).toBe('POST')
+    expect(init.body).toBeInstanceOf(FormData)
+    expect(init.body.get('archivo')).toBe(file)
+    expect(init.headers['Content-Type']).toBeUndefined()
+  })
+
+  it('documentUrl añade ?ver=1 solo para verlo en el navegador', () => {
+    expect(documentUrl(5, true)).toBe('/api/documentos/5?ver=1')
+    expect(documentUrl(5, false)).toBe('/api/documentos/5')
   })
 })

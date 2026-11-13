@@ -19,7 +19,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import App from '../App'
-import { ApiError, listRoles, listUsers, login, logout, me, resetPassword } from '../api/client'
+import { ApiError, listProjects, listRoles, listUsers, login, logout, me, resetPassword } from '../api/client'
 import Layout from '../components/Layout'
 import Home from './Home'
 import Login from './Login'
@@ -32,6 +32,7 @@ vi.mock('../api/client', async (orig) => ({
   me: vi.fn(),
   resetPassword: vi.fn(),
   listRoles: vi.fn(),
+  listProjects: vi.fn(),
   listUsers: vi.fn(),
 }))
 
@@ -185,6 +186,14 @@ describe('Layout (menú)', () => {
     expect(screen.getByRole('link', { name: 'Usuarios' })).toHaveClass('active')
     expect(screen.getByRole('link', { name: 'Inicio' })).not.toHaveClass('active')
   })
+
+  it('la entrada «Proyectos» solo la ve el administrador', () => {
+    const { unmount } = inRouter(<Layout user={ADMIN} onLogout={vi.fn()} />)
+    expect(screen.getByRole('link', { name: 'Proyectos' })).toHaveAttribute('href', '/proyectos')
+    unmount()
+    inRouter(<Layout user={PEPE} onLogout={vi.fn()} />)
+    expect(screen.queryByRole('link', { name: 'Proyectos' })).not.toBeInTheDocument()
+  })
 })
 
 // Cubre el guard de sesión: errores de me() distintos de 401 y que no se queden pegados tras logout.
@@ -263,5 +272,23 @@ describe('App', () => {
     vi.mocked(me).mockResolvedValue(null)
     inRouter(<App />, '/roles')
     expect(await screen.findByRole('heading', { name: 'Iniciar sesión' })).toBeInTheDocument()
+  })
+
+  it('el administrador llega a /proyectos desde el menú', async () => {
+    vi.mocked(me).mockResolvedValue(ADMIN)
+    vi.mocked(listProjects).mockResolvedValue([])
+    inRouter(<App />)
+    await userEvent.click(await screen.findByRole('link', { name: 'Proyectos' }))
+    expect(await screen.findByRole('heading', { name: 'Proyectos' })).toBeInTheDocument()
+  })
+
+  it('un usuario normal que escribe /proyectos o /proyectos/1 a mano vuelve a la home', async () => {
+    vi.mocked(me).mockResolvedValue(PEPE)
+    const { unmount } = inRouter(<App />, '/proyectos')
+    expect(await screen.findByText('Hola, pepe')).toBeInTheDocument()
+    unmount()
+    inRouter(<App />, '/proyectos/1')
+    expect(await screen.findByText('Hola, pepe')).toBeInTheDocument()
+    expect(listProjects).not.toHaveBeenCalled()
   })
 })

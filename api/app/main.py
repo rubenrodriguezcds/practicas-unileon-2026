@@ -2,6 +2,7 @@
 
 Para qué: junta las piezas en una app lista para servir: configuración, sesión por cookie,
 endpoints (/api/health, /api/auth/*, /api/captcha, /api/roles, /api/usuarios) y, si procede, el frontend compilado.
+También /api/proyectos y /api/documentos (issue #7), con un límite previo al tamaño de las subidas.
 Al arrancar aplica las migraciones de la bbdd pendientes (app/migrations.py).
 
 Por qué existe: es el único sitio donde se conectan los módulos entre sí. Cada módulo nuevo
@@ -24,12 +25,13 @@ Notas:
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import Settings, get_settings
 from app.migrations import migrate
-from app.routers import auth, captcha, roles, usuarios
+from app.routers import auth, captcha, proyectos, roles, usuarios
 from app.spa import mount_spa
 
 logger = logging.getLogger(__name__)
@@ -65,6 +67,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(captcha.router)
     app.include_router(roles.router)
     app.include_router(usuarios.router)
+    app.include_router(proyectos.router)
+    app.include_router(proyectos.documentos_router)
+
+    @app.middleware("http")
+    async def limite_documentos(request: Request, call_next):
+        """Corta las peticiones con cuerpo demasiado grande ANTES de leerlo (pensado para las subidas
+        de documentos de la issue #7).
+
+        Sin esto, FastAPI escribiría el archivo entero en un temporal antes de llegar al endpoint
+        (un archivo de 2 GB ocuparía disco aunque luego se rechace). Se aplica a TODA la API y no
+        solo a la ruta de subida: FastAPI acepta ids como «+1» o «1_0», y un filtro por la forma de
+        la ruta se podría saltar; el resto de peticiones son JSON pequeños. El navegador siempre
+        manda Content-Length; un cuerpo por trozos sin él (411) no se puede medir sin leerlo. 1 MB
+        de margen para las cabeceras del multipart; el endpoint comprueba después el tamaño real.
+        """
+        if request.url.path.startswith("/api/"):
+            largo = request.headers.get("content-length")
+            max_mb = settings.documento_max_mb
+            if largo is None and "transfer-encoding" in request.headers:
+                return JSONResponse({"detail": "Falta la cabecera Content-Length"}, status_code=411)
+            if largo is not None and (not largo.isdigit() or int(largo) > (max_mb + 1) * 1024 * 1024):
+                # El tipo de contenido solo elige el mensaje; el corte no depende de él.
+                es_archivo = request.headers.get("content-type", "").startswith("multipart/form-data")
+                msg = proyectos.tamano_msg(max_mb) if es_archivo else "La petición es demasiado grande"
+                return JSONResponse({"detail": msg}, status_code=413)
+        return await call_next(request)
 
     @app.get("/api/health")
     def health():

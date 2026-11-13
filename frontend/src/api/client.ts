@@ -39,14 +39,15 @@ export type Rol = { id: number; nombre: string; descripcion: string | null; num_
 export type UsuarioDeRol = { id: number; username: string; email: string | null }
 
 /**
- * Envuelve `fetch` con cookies de sesión y cabecera JSON.
+ * Envuelve `fetch` con cookies de sesión y cabecera JSON (salvo en subidas con FormData).
  * @throws {ApiError} si la respuesta no es 2xx, con el `detail` del cuerpo cuando existe.
  */
 async function request(path: string, init?: RequestInit): Promise<Response> {
   const res = await fetch(path, {
     credentials: 'same-origin',
     ...init,
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    // Con FormData el navegador pone el Content-Type con su boundary; fijarlo a mano lo rompería.
+    headers: { ...(init?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }), ...init?.headers },
   })
   if (!res.ok) {
     const body = await res.json().catch(() => null)
@@ -218,4 +219,78 @@ export async function addUserRole(id: number, rolId: number): Promise<void> {
 /** Quita un rol a un usuario (DELETE /api/usuarios/{id}/roles/{rolId}). */
 export async function removeUserRole(id: number, rolId: number): Promise<void> {
   await request(`/api/usuarios/${id}/roles/${rolId}`, { method: 'DELETE' })
+}
+
+// --- Proyectos y documentos (issue #7). Solo para el administrador: la API responde 403 a cualquier otro. ---
+
+/** Proyecto del listado; `num_documentos` es cuántos documentos tiene adjuntos. */
+export type Proyecto = { id: number; nombre: string; tipo: string | null; descripcion: string | null; num_documentos: number }
+
+/** Documento adjunto a un proyecto; `tamano` en bytes y `visible` si el navegador puede mostrarlo. */
+export type Documento = { id: number; nombre: string; tamano: number; visible: boolean }
+
+/** Proyecto con sus documentos (GET /api/proyectos/{id}). */
+export type ProyectoDetalle = Omit<Proyecto, 'num_documentos'> & { documentos: Documento[] }
+
+/** Todos los proyectos (GET /api/proyectos). */
+export async function listProjects(): Promise<Proyecto[]> {
+  return (await request('/api/proyectos')).json()
+}
+
+/**
+ * Crea un proyecto (POST /api/proyectos). Los textos van tal cual: la API recorta y guarda los vacíos como null.
+ * @throws {ApiError} 409 si ya hay un proyecto con ese nombre; la pantalla muestra el mensaje.
+ */
+export async function createProject(p: { nombre: string; tipo: string; descripcion: string }): Promise<Proyecto> {
+  const res = await request('/api/proyectos', { method: 'POST', body: JSON.stringify(p) })
+  return res.json()
+}
+
+/**
+ * Un proyecto con sus documentos (GET /api/proyectos/{id}).
+ * @throws {ApiError} 404 si ya no existe.
+ */
+export async function getProject(id: number): Promise<ProyectoDetalle> {
+  return (await request(`/api/proyectos/${id}`)).json()
+}
+
+/**
+ * Cambia nombre, tipo y descripción de un proyecto (PUT /api/proyectos/{id}). Los textos van tal cual, como al crear.
+ * @throws {ApiError} 409 si otro proyecto ya tiene ese nombre; 404 si ya no existe.
+ */
+export async function updateProject(id: number, p: { nombre: string; tipo: string; descripcion: string }): Promise<Proyecto> {
+  const res = await request(`/api/proyectos/${id}`, { method: 'PUT', body: JSON.stringify(p) })
+  return res.json()
+}
+
+/**
+ * Borra un proyecto y sus documentos (DELETE /api/proyectos/{id}).
+ * @throws {ApiError} 404 si ya no existe.
+ */
+export async function deleteProject(id: number): Promise<void> {
+  await request(`/api/proyectos/${id}`, { method: 'DELETE' })
+}
+
+/**
+ * Sube un documento a un proyecto (POST /api/proyectos/{id}/documentos, multipart con el campo `archivo`).
+ * @throws {ApiError} 409 si ya hay uno con ese nombre en el proyecto; 413 si pasa del tamaño máximo.
+ */
+export async function uploadDocument(proyectoId: number, file: File): Promise<Omit<Documento, 'visible'>> {
+  const body = new FormData()
+  body.append('archivo', file)
+  const res = await request(`/api/proyectos/${proyectoId}/documentos`, { method: 'POST', body })
+  return res.json()
+}
+
+/**
+ * Borra un documento (DELETE /api/documentos/{id}).
+ * @throws {ApiError} 404 si ya no existe.
+ */
+export async function deleteDocument(id: number): Promise<void> {
+  await request(`/api/documentos/${id}`, { method: 'DELETE' })
+}
+
+/** URL del documento: con `ver` se abre en el navegador (?ver=1) y sin él se descarga. */
+export function documentUrl(id: number, ver: boolean): string {
+  return `/api/documentos/${id}${ver ? '?ver=1' : ''}`
 }

@@ -32,3 +32,10 @@ def test_captcha_desactivado_no_exige_clave():
 def test_smtp_tls_solo_valores_conocidos():
     with pytest.raises(ValidationError):
         make_settings(smtp_tls="tls")
+
+
+def test_documento_max_mb_por_defecto_y_minimo():
+    """Los documentos se guardan en Postgres: el límite es 50 MB y nunca puede ser 0."""
+    assert make_settings().documento_max_mb == 50
+    with pytest.raises(ValidationError):
+        make_settings(documento_max_mb=0)

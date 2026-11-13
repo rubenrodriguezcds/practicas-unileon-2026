@@ -16,6 +16,7 @@
  * Notas: si /me falla por algo distinto de «no hay sesión» (p. ej. 503, bbdd caída) el mensaje
  * se muestra en el login en vez de tragárselo. /roles y /usuarios redirigen a / si el usuario no
  * es admin; es solo comodidad: la API responde 403 de todos modos.
+ * Issue #7: /proyectos → Proyectos y /proyectos/:id → ProyectoDetalle, también solo para admin.
  */
 
 import { useEffect, useState } from 'react'
@@ -26,6 +27,8 @@ import Home from './pages/Home'
 import Login from './pages/Login'
 import ResetPassword from './pages/ResetPassword'
 import Roles from './pages/Roles'
+import Proyectos from './pages/Proyectos'
+import ProyectoDetalle from './pages/ProyectoDetalle'
 import UsuarioDetalle from './pages/UsuarioDetalle'
 import Usuarios from './pages/Usuarios'
 
@@ -66,6 +69,8 @@ export default function App() {
         <Route path="/roles" element={user?.es_admin ? <Roles /> : <Navigate to="/" replace />} />
         <Route path="/usuarios" element={user?.es_admin ? <Usuarios yo={user.username} /> : <Navigate to="/" replace />} />
         <Route path="/usuarios/:id" element={user?.es_admin ? <UsuarioDetalle yo={user.username} onCambio={refrescar} /> : <Navigate to="/" replace />} />
+        <Route path="/proyectos" element={user?.es_admin ? <Proyectos /> : <Navigate to="/" replace />} />
+        <Route path="/proyectos/:id" element={user?.es_admin ? <ProyectoDetalle /> : <Navigate to="/" replace />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
