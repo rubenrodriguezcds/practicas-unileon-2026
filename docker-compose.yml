@@ -30,5 +30,34 @@ services:
       db:
         condition: service_healthy
 
+  # Prueba de extracción con Docling (rama de pruebas, ver prueba_docling/README.md).
+  docling:
+    # Versión fijada para que la prueba se pueda repetir con el mismo resultado.
+    image: quay.io/docling-project/docling-serve-cpu:v1.38.2
+    environment:
+      DOCLING_SERVE_ENABLE_UI: "true"    # interfaz web en http://localhost:5001/ui
+      DOCLING_SERVE_MAX_SYNC_WAIT: "900" # documentos con OCR tardan más que los 120 s por defecto
+    ports:
+      # Excepción a la regla de puertos solo en esta rama de pruebas: 127.0.0.1, no se ve desde la red.
+      - "127.0.0.1:5001:5001"
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:5001/health"]
+      interval: 10s
+      retries: 30
+
+  # Scripts de la prueba (Python + LibreOffice). Con perfil para que `up` no lo arranque:
+  # se usa con `docker compose run --rm prueba python <script>.py`.
+  prueba:
+    build: ./prueba_docling
+    profiles: ["prueba"]
+    working_dir: /trabajo
+    volumes:
+      - ./prueba_docling:/trabajo
+    environment:
+      DOCLING_URL: http://docling:5001
+    depends_on:
+      docling:
+        condition: service_healthy
+
 volumes:
   pgdata:

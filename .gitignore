@@ -24,3 +24,6 @@ __pycache__/
 .pytest_cache/
 node_modules/
 dist/
+
+# Prueba de extracción con Docling: las salidas se regeneran con los scripts
+prueba_docling/salidas/
