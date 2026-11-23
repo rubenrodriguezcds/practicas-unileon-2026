@@ -292,7 +292,8 @@ Por qué así:
   Una subida que anuncia más tamaño se corta antes de leerla, para no llenar el disco.
 - **Solo se admiten algunos tipos**: PDF, imágenes (`png`, `jpg`, `jpeg`, `gif`, `webp`), texto
   (`txt`, `md`, `csv`) y Office/LibreOffice (`doc`, `docx`, `xls`, `xlsx`, `ppt`, `pptx`, `odt`,
-  `ods`, `odp`). El resto (`html`, `svg`, ejecutables…) se rechaza con 415.
+  `ods`, `odp`) y diagramas Visio (`vsdx`, `vsd`). El resto (`html`, `svg`, ejecutables…) se
+  rechaza con 415.
 - **«Ver» solo abre en el navegador PDF, imágenes y texto**; lo demás se descarga. Las descargas
   llevan cabeceras que impiden que un documento ejecute código con la sesión del administrador.
 - **En un mismo proyecto no puede haber dos documentos con el mismo nombre** (con la extensión y

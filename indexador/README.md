@@ -45,10 +45,11 @@ indexador:  1. cola.coger              coge un pendiente (FOR UPDATE SKIP LOCKED
 | `cola.py` | Coger el siguiente documento y apuntar «hecho» o «error» |
 | `convertir.py` | Camino de cada tipo y conversión con LibreOffice |
 | `docling_cliente.py` | Llamada a Docling; define `Trozo` y `Resultado` |
+| `visio.py` | Texto de las formas y conexiones «A → B» de un `.vsdx`, un trozo por página |
 | `Dockerfile` | Python 3.12 + LibreOffice sin interfaz, sin root |
 
-Faltan `visio.py`, `embeddings.py`, `guardar.py`, `procesar.py` y `main.py` (el bucle), y el
-servicio `indexador` en el compose.
+Faltan `embeddings.py`, `guardar.py`, `procesar.py` y `main.py` (el bucle), y el servicio
+`indexador` en el compose.
 
 ## Pruebas
 
