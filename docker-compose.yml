@@ -30,20 +30,38 @@ services:
       db:
         condition: service_healthy
 
-  # Prueba de extracción con Docling (rama de pruebas, ver prueba_docling/README.md).
+  # Docling: lee los documentos (texto, títulos, tablas, OCR) y los trocea para el asistente.
+  # Sin puertos publicados: solo lo usa el indexador por la red interna.
   docling:
-    # Versión fijada para que la prueba se pueda repetir con el mismo resultado.
+    # Versión fijada: el indexador está probado contra la respuesta de esta versión.
     image: quay.io/docling-project/docling-serve-cpu:v1.38.2
     environment:
-      DOCLING_SERVE_ENABLE_UI: "true"    # interfaz web en http://localhost:5001/ui
       DOCLING_SERVE_MAX_SYNC_WAIT: "900" # documentos con OCR tardan más que los 120 s por defecto
-    ports:
-      # Excepción a la regla de puertos solo en esta rama de pruebas: 127.0.0.1, no se ve desde la red.
-      - "127.0.0.1:5001:5001"
     healthcheck:
       test: ["CMD", "curl", "-fs", "http://localhost:5001/health"]
       interval: 10s
       retries: 30
+
+  # Indexador: en segundo plano convierte, trocea y vectoriza los documentos subidos y los guarda
+  # en Postgres (ver indexador/README.md). Sin puertos publicados.
+  indexador:
+    build: ./indexador
+    env_file: .env
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DOCLING_URL: http://docling:5001
+      # Ollama (embeddings con bge-m3) está en el servidor; en desarrollo se llega por un túnel SSH
+      # abierto en el ordenador (ver README). host.docker.internal = el ordenador, visto desde Docker.
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11435}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # en Linux no existe por defecto (en Mac/Windows sí)
+    depends_on:
+      db:
+        condition: service_healthy
+      docling:
+        condition: service_healthy
+    restart: unless-stopped
 
   # Scripts de la prueba (Python + LibreOffice). Con perfil para que `up` no lo arranque:
   # se usa con `docker compose run --rm prueba python <script>.py`.

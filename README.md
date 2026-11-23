@@ -104,6 +104,8 @@ docker compose ps             # db (healthy) y web (Up)
 | `DOCUMENTO_MAX_MB` | Tamaño máximo de cada documento adjunto a un proyecto, en MB. Por defecto `50` |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | Servidor de correo para el reseteo. **Vacío = modo log** (ver aviso abajo) |
 | `SMTP_TLS` | `starttls` (puerto 587, Brevo y Gmail; por defecto), `ssl` (465) o `none` |
+| `OLLAMA_URL` | Dónde está Ollama (embeddings del asistente). En desarrollo, el túnel SSH al servidor: `http://host.docker.internal:11435` (por defecto); en el servidor, `http://localhost:11434` |
+| `EMBEDDINGS_MODELO` | Modelo de embeddings en Ollama. Por defecto `bge-m3` (1024 dimensiones, el tamaño de la tabla) |
 
 Para generar un `APP_SECRET` o un `ALTCHA_HMAC_KEY`:
 
@@ -323,10 +325,10 @@ Por qué así:
 <summary><b>Estructura del repositorio</b></summary>
 
 ```
-docker-compose.yml        Orquesta db + web
+docker-compose.yml        Orquesta db + web + docling + indexador
 .env.example              Plantilla de variables
 db/                       Contenedor de base de datos
-  Dockerfile              postgres:16 + openssh-server
+  Dockerfile              postgres:16 con pgvector + openssh-server
   entrypoint.sh           Arranca sshd y luego el arranque oficial de Postgres
   init/01_schema.sql      Tablas
   init/02_seed.sh         Usuario admin de la web (contraseña del .env)
@@ -356,6 +358,8 @@ frontend/                 Frontend React + Vite + TypeScript
                           ConfirmDialog (aviso antes de borrar) y DropZone (arrastrar archivos)
   src/App.tsx             Rutas y control de sesión
 docker/web.Dockerfile     Imagen del contenedor web
+indexador/                Contenedor que indexa los documentos para el asistente (ver su README)
+prueba_docling/           Prueba de extracción con Docling y muestras ficticias
 ```
 
 </details>

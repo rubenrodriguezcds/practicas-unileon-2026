@@ -52,7 +52,24 @@ indexador:  1. cola.coger              coge un pendiente (FOR UPDATE SKIP LOCKED
 | `main.py` | Bucle: coger → procesar; sobrevive a la bbdd caída y a la migración 005 aún sin aplicar |
 | `Dockerfile` | Python 3.12 + LibreOffice sin interfaz, sin root |
 
-Falta el servicio `indexador` en el compose.
+## En marcha
+
+```bash
+docker compose up -d --build              # db, web, docling e indexador
+docker compose logs -f indexador          # qué documento procesa y cuánto tarda
+```
+
+- **Ollama** (embeddings con bge-m3) está en el servidor: en desarrollo hay que tener abierto el
+  túnel SSH (ver `OLLAMA_URL` en `.env.example`). Si no lo está, los documentos quedan en «error:
+  Ollama no responde…» y se reintentan solos al abrirlo.
+- **Reintentar los que agotaron sus 3 intentos** (por ejemplo, tras mucho rato con el túnel cerrado):
+
+  ```bash
+  docker compose exec db psql -U gestor -d gestor -c "DELETE FROM indexado WHERE estado = 'error';"
+  ```
+
+  Sin fila en `indexado` vuelven a estar pendientes y el indexador los coge.
+- **Ver lo indexado**: `SELECT documento_id, orden, titulos, paginas, left(texto, 80) FROM fragmentos;`
 
 ## Pruebas
 
