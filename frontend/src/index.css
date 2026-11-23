@@ -91,3 +91,12 @@ dialog .botones { display: flex; justify-content: flex-end; gap: 0.5rem; }
 td.acciones a { align-self: center; font-size: 0.9rem; }
 /* Botón suelto dentro de .pagina (columna flex): a su tamaño, no a todo el ancho. */
 .pagina > button.suelto { align-self: flex-start; }
+
+/* --- Buscador del asistente (pages/Buscador.tsx) --- */
+.resultados { display: flex; flex-direction: column; gap: 0.75rem; }
+.resultado { display: flex; flex-direction: column; gap: 0.35rem; padding: 0.75rem 1rem; border: 1px solid #e5e7eb; border-radius: 0.5rem; }
+.resultado header { display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; align-items: baseline; }
+.resultado header a { color: #2563eb; font-weight: 600; }
+.resultado .seccion { color: #4b5563; font-size: 0.85rem; }
+.resultado .trozo { margin: 0; white-space: pre-wrap; font-size: 0.95rem; }
+.resultado .puntuaciones { color: #4b5563; font-size: 0.8rem; font-variant-numeric: tabular-nums; }

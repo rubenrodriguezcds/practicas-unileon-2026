@@ -300,3 +300,29 @@ export async function deleteDocument(id: number): Promise<void> {
 export function documentUrl(id: number, ver: boolean): string {
   return `/api/documentos/${id}${ver ? '?ver=1' : ''}`
 }
+
+// --- Buscador del asistente (fase 1: buscador de prueba) ---
+
+/** Un trozo encontrado. Las puntuaciones son null si el trozo no salió en ese ranking. */
+export type ResultadoBusqueda = {
+  documento_id: number
+  documento: string
+  proyecto_id: number
+  proyecto: string
+  titulos: string[]
+  paginas: number[]
+  texto: string
+  puntuacion_vector: number | null
+  puntuacion_texto: number | null
+  puntuacion: number
+}
+
+/**
+ * Trozos de documentos más parecidos a la pregunta (GET /api/busqueda), de todos los proyectos o de uno.
+ * @throws {ApiError} 503 si Ollama no responde, 502 si responde con error; la pantalla muestra el mensaje.
+ */
+export async function searchFragments(q: string, proyectoId: number | null): Promise<ResultadoBusqueda[]> {
+  const params = new URLSearchParams({ q })
+  if (proyectoId !== null) params.set('proyecto_id', String(proyectoId))
+  return (await request(`/api/busqueda?${params}`)).json()
+}
