@@ -226,8 +226,14 @@ export async function removeUserRole(id: number, rolId: number): Promise<void> {
 /** Proyecto del listado; `num_documentos` es cuántos documentos tiene adjuntos. */
 export type Proyecto = { id: number; nombre: string; tipo: string | null; descripcion: string | null; num_documentos: number }
 
+/**
+ * En qué punto está el indexado de un documento para el asistente: `pendiente` (el indexador aún no
+ * lo ha cogido), `procesando`, `hecho` (con `fragmentos` trozos) o `error` (con el motivo).
+ */
+export type Indexado = { estado: 'pendiente' | 'procesando' | 'hecho' | 'error'; error: string | null; fragmentos: number }
+
 /** Documento adjunto a un proyecto; `tamano` en bytes y `visible` si el navegador puede mostrarlo. */
-export type Documento = { id: number; nombre: string; tamano: number; visible: boolean }
+export type Documento = { id: number; nombre: string; tamano: number; visible: boolean; indexado: Indexado }
 
 /** Proyecto con sus documentos (GET /api/proyectos/{id}). */
 export type ProyectoDetalle = Omit<Proyecto, 'num_documentos'> & { documentos: Documento[] }
@@ -275,7 +281,7 @@ export async function deleteProject(id: number): Promise<void> {
  * Sube un documento a un proyecto (POST /api/proyectos/{id}/documentos, multipart con el campo `archivo`).
  * @throws {ApiError} 409 si ya hay uno con ese nombre en el proyecto; 413 si pasa del tamaño máximo.
  */
-export async function uploadDocument(proyectoId: number, file: File): Promise<Omit<Documento, 'visible'>> {
+export async function uploadDocument(proyectoId: number, file: File): Promise<Omit<Documento, 'visible' | 'indexado'>> {
   const body = new FormData()
   body.append('archivo', file)
   const res = await request(`/api/proyectos/${proyectoId}/documentos`, { method: 'POST', body })

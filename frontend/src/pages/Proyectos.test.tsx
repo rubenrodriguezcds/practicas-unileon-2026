@@ -13,7 +13,7 @@
 
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import {
   ApiError, createProject, deleteDocument, deleteProject, getProject, listProjects, updateProject, uploadDocument,
@@ -43,8 +43,8 @@ const APP: Proyecto = { id: 2, nombre: 'App', tipo: null, descripcion: null, num
 const DETALLE: ProyectoDetalle = {
   id: 1, nombre: 'Web', tipo: 'Interno', descripcion: 'La web del proyecto',
   documentos: [
-    { id: 10, nombre: 'a.pdf', tamano: 2048, visible: true },
-    { id: 11, nombre: 'b.docx', tamano: 500, visible: false },
+    { id: 10, nombre: 'a.pdf', tamano: 2048, visible: true, indexado: { estado: 'hecho', error: null, fragmentos: 12 } },
+    { id: 11, nombre: 'b.docx', tamano: 500, visible: false, indexado: { estado: 'error', error: 'Docling no responde', fragmentos: 0 } },
   ],
 }
 
@@ -265,5 +265,47 @@ describe('ProyectoDetalle', () => {
     const estado = await screen.findByRole('list', { name: 'Subidas' })
     await waitFor(() => expect(within(estado).getByText(/otro\.pdf/).closest('li')).toHaveTextContent('El proyecto no existe'))
     expect(within(estado).getByText(/vacio\.pdf/).closest('li')).toHaveTextContent('El archivo está vacío')
+  })
+
+  it('la columna «Asistente» dice en qué punto está cada documento', async () => {
+    vi.mocked(getProject).mockResolvedValue({
+      ...DETALLE,
+      documentos: [
+        ...DETALLE.documentos,
+        { id: 12, nombre: 'c.pdf', tamano: 1, visible: true, indexado: { estado: 'pendiente', error: null, fragmentos: 0 } },
+        { id: 13, nombre: 'd.pdf', tamano: 1, visible: true, indexado: { estado: 'procesando', error: null, fragmentos: 0 } },
+      ],
+    })
+    verDetalle()
+    expect(within(await fila('a.pdf')).getByText('Listo (12 trozos)')).toBeInTheDocument()
+    const error = within(await fila('b.docx')).getByText(/Error/)
+    expect(error).toHaveTextContent('Error: Docling no responde')
+    expect(error).toHaveAttribute('title', 'Docling no responde')
+    expect(within(await fila('c.pdf')).getByText('Pendiente')).toBeInTheDocument()
+    expect(within(await fila('d.pdf')).getByText('Indexando…')).toBeInTheDocument()
+  })
+
+  describe('refresco del estado del asistente', () => {
+    beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true }) })
+    afterEach(() => { vi.useRealTimers() })
+
+    it('con documentos pendientes o indexándose vuelve a pedir el detalle cada 5 s', async () => {
+      vi.mocked(getProject).mockResolvedValue({
+        ...DETALLE,
+        documentos: [{ ...DETALLE.documentos[0], indexado: { estado: 'procesando', error: null, fragmentos: 0 } }],
+      })
+      verDetalle()
+      await fila('a.pdf')
+      expect(getProject).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(5000)
+      expect(getProject).toHaveBeenCalledTimes(2)
+    })
+
+    it('si todos están listos o en error no vuelve a pedirlo', async () => {
+      verDetalle()
+      await fila('a.pdf')
+      await vi.advanceTimersByTimeAsync(15000)
+      expect(getProject).toHaveBeenCalledTimes(1)
+    })
   })
 })
