@@ -38,7 +38,9 @@ def vectorizar(textos: list[str], url: str, modelo: str = MODELO,
     """
     if not textos:
         return []
-    cliente = cliente or httpx.Client(timeout=TIEMPO_MAX_S)
+    if cliente is None:
+        with httpx.Client(timeout=TIEMPO_MAX_S) as propio:  # se cierra al terminar el documento
+            return vectorizar(textos, url, modelo, propio)
     vectores: list[list[float]] = []
     for i in range(0, len(textos), LOTE):
         lote = textos[i:i + LOTE]

@@ -30,6 +30,10 @@
 > sus roles), solo para el administrador.
 >
 > **Issue #7:** gestión de proyectos y de sus documentos adjuntos, solo para el administrador.
+>
+> **Asistente IA, fase 1:** cada documento subido se lee (Docling), se trocea y se vectoriza
+> (bge-m3 en Ollama) en segundo plano; la ficha del proyecto muestra su estado y la página
+> «Buscador» permite probar la búsqueda por significado y por palabras.
 
 ## Arquitectura
 
@@ -46,28 +50,41 @@ flowchart LR
             api["FastAPI · /api/*"]
         end
         subgraph db["db"]
-            pg[("PostgreSQL 16")]
+            pg[("PostgreSQL 16 + pgvector")]
             sshd["OpenSSH"]
         end
+        docling["docling"]
+        indexador["indexador"]
         api -- "db:5432" --> pg
+        indexador -- "db:5432" --> pg
+        indexador -- "docling:5001" --> docling
     end
+    ollama(["Ollama · bge-m3<br/>(servidor, por túnel SSH)"])
 
     nav -- ":80" --> web
     clientebd -- ":1521" --> pg
     sshc -- ":22" --> sshd
+    indexador -.-> ollama
+    api -.-> ollama
 
     classDef webC fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
     classDef dbC fill:#dcfce7,stroke:#16a34a,color:#14532d
     classDef ext fill:#fef3c7,stroke:#d97706,color:#78350f
-    class spa,api webC
+    class spa,api,docling,indexador webC
     class pg,sshd dbC
-    class nav,clientebd,sshc ext
+    class nav,clientebd,sshc,ollama ext
 ```
 
 | Contenedor | Contenido | Puertos publicados |
 |---|---|---|
 | `web` | FastAPI sirve la API (`/api/*`) y el frontend React compilado. | `80` |
-| `db` | PostgreSQL 16 + OpenSSH. Al arrancar crea las tablas si no existen. | `1521` → 5432 (Postgres), `22` (SSH) |
+| `db` | PostgreSQL 16 con pgvector + OpenSSH. Al arrancar crea las tablas si no existen. | `1521` → 5432 (Postgres), `22` (SSH) |
+| `docling` | [docling-serve](https://github.com/docling-project/docling-serve) (CPU): lee y trocea los documentos. | ninguno |
+| `indexador` | Indexa en segundo plano los documentos subidos (ver [`indexador/README.md`](indexador/README.md)). | ninguno |
+
+Ollama (embeddings con `bge-m3`) **no** es un contenedor del proyecto: está en el servidor de la
+universidad. En desarrollo, `indexador` y `web` llegan a él por un túnel SSH abierto en el
+ordenador (ver «Asistente IA» en [Uso](#uso)).
 
 > [!IMPORTANT]
 > Ningún otro puerto queda expuesto. La web llega a la bbdd por la **red interna** de Docker
@@ -138,13 +155,26 @@ python -c "import secrets;print(secrets.token_hex(32))"
 | Gestión de usuarios (solo administrador) | http://localhost/usuarios (o «Usuarios» en el menú) |
 | Gestión de roles (solo administrador) | http://localhost/roles (o «Roles» en el menú) |
 | Gestión de proyectos y documentos (solo administrador) | http://localhost/proyectos (o «Proyectos» en el menú) |
+| Buscador del asistente (solo administrador) | http://localhost/buscador (o «Buscador» en el menú); necesita el túnel a Ollama |
+| Ver lo indexado | Columna «Asistente» en la ficha del proyecto, o en la bbdd: `SELECT documento_id, orden, titulos, paginas, left(texto, 80) FROM fragmentos;` |
 | Estado de la API | http://localhost/api/health |
 | Documentación de la API | http://localhost/api/docs |
 | Consultar la bbdd | `docker compose exec db psql -U gestor -d gestor` (ya incluido), o cualquier cliente de PostgreSQL (DBeaver, pgAdmin…) con host `localhost` y puerto `1521` |
 | SSH al contenedor de bbdd | `ssh -p 22 <SSH_USER>@localhost` |
-| Ver logs | `docker compose logs -f web` / `docker compose logs -f db` |
+| Ver logs | `docker compose logs -f web` / `docker compose logs -f db` / `docker compose logs -f indexador` |
 | Parar (conserva los datos) | `docker compose down` |
 | Parar y borrar la bbdd | `docker compose down -v` (al volver a arrancar se recrean las tablas) |
+
+> [!IMPORTANT]
+> **Asistente IA:** los embeddings los calcula Ollama en el servidor de la universidad. Antes de
+> subir documentos o buscar, con la VPN conectada, abre el túnel en otra terminal y déjalo abierto:
+>
+> ```bash
+> ssh -N -L 11435:localhost:11434 <usuario>@<ip del servidor>
+> ```
+>
+> Sin él, los documentos quedan en «Error: Ollama no responde…» (se reintentan solos al abrirlo)
+> y el buscador responde 503.
 
 ## API
 
@@ -313,6 +343,14 @@ Por qué así:
 
 ## Cómo funciona por dentro
 
+- **Asistente IA (fase 1)**: subir un documento no cambia; el contenedor `indexador` lo coge de
+  una cola en la propia Postgres (un documento sin fila en `indexado` está pendiente), lo pasa a
+  PDF con LibreOffice si Docling no abre su formato, lo trocea con Docling (con su sección y sus
+  páginas), añade las conexiones «A → B» de los Visio, vectoriza los trozos con bge-m3 y los
+  guarda en `fragmentos` (`halfvec(1024)`). Los fallos se reintentan 3 veces y quedan en «error»
+  con el motivo, visible en la ficha. El buscador combina dos rankings (por significado y por
+  palabras) con RRF. Detalle en [`indexador/README.md`](indexador/README.md).
+
 - **Creación del modelo de datos**: los scripts de `db/init/` se ejecutan automáticamente
   la primera vez que arranca el contenedor (con el volumen vacío). Además son idempotentes
   (`CREATE TABLE IF NOT EXISTS`, `ON CONFLICT DO NOTHING`), así que relanzarlos no rompe nada.
@@ -351,6 +389,8 @@ api/                      Backend FastAPI
   app/routers/roles.py    Gestión de roles (solo administrador)
   app/routers/usuarios.py Gestión de usuarios y de sus roles (solo administrador)
   app/routers/proyectos.py  Gestión de proyectos y documentos (solo administrador)
+  app/routers/busqueda.py Buscador del asistente: búsqueda híbrida (solo administrador)
+  app/embeddings.py       Vector de la pregunta con bge-m3 en Ollama
   app/documentos.py       Tipos de archivo permitidos y nombres de los documentos
   app/spa.py              Sirve el frontend compilado
   app/main.py             Monta la aplicación
@@ -360,6 +400,7 @@ frontend/                 Frontend React + Vite + TypeScript
   src/api/client.ts       Único punto de llamada a la API
   src/pages/              Login, ResetPassword, Home, Roles, Usuarios y UsuarioDetalle
                           Proyectos y ProyectoDetalle (gestión de proyectos y documentos)
+                          Buscador (buscador de prueba del asistente)
   src/components/         Captcha, Logo y Layout (menú de las pantallas con sesión)
                           ConfirmDialog (aviso antes de borrar) y DropZone (arrastrar archivos)
   src/App.tsx             Rutas y control de sesión
@@ -395,6 +436,19 @@ variables de `.env` cargadas y una bbdd accesible).
 </details>
 
 <details>
+<summary><b>Indexador</b></summary>
+
+```bash
+cd indexador
+python -m venv .venv
+.venv/Scripts/activate        # Windows  (Linux/Mac: source .venv/bin/activate)
+pip install -r requirements-dev.txt
+pytest -q                     # sin servicios reales: Docling, Ollama y la bbdd son dobles
+```
+
+</details>
+
+<details>
 <summary><b>Frontend (React + Vite)</b></summary>
 
 ```bash
@@ -408,6 +462,20 @@ npm run dev                   # http://localhost:5173, redirige /api a localhost
 </details>
 
 ## Problemas frecuentes
+
+<details>
+<summary><b>Los documentos se quedan en «Error: Ollama no responde…» o el buscador da 503</b></summary>
+
+El túnel SSH al servidor está cerrado (o la VPN desconectada). Ábrelo (ver «Asistente IA» en
+[Uso](#uso)) y comprueba que responde: `curl http://localhost:11435/api/version`. Los documentos
+se reintentan solos (tras 1 y 2 minutos); los que ya agotaron sus 3 intentos se vuelven a poner
+en cola con:
+
+```bash
+docker compose exec db psql -U gestor -d gestor -c "DELETE FROM indexado WHERE estado = 'error';"
+```
+
+</details>
 
 <details>
 <summary><b>Docker arranca pero el login con <code>admin</code> dice «Usuario o contraseña incorrectos»</b></summary>

@@ -47,7 +47,7 @@ class Dependencias:
 
 
 def procesar(conn, doc: dict, cfg, dep: Dependencias = Dependencias()) -> str:
-    """Indexa `doc` ({id, proyecto_id, nombre, contenido}); devuelve "hecho" o "error"."""
+    """Indexa `doc` ({id, proyecto_id, nombre, contenido}); devuelve "hecho", "error" o "descartado"."""
     inicio = time.monotonic()
     nombre, contenido = doc["nombre"], doc["contenido"]
     ruta = convertir.camino(nombre)
@@ -63,12 +63,14 @@ def procesar(conn, doc: dict, cfg, dep: Dependencias = Dependencias()) -> str:
         if ruta == "visio":
             trozos += dep.trozos_visio(doc["contenido"])  # del .vsdx original: el PDF no tiene las flechas
         vectores = dep.vectorizar([t.texto for t in trozos], cfg.ollama_url, cfg.embeddings_modelo) if trozos else []
-        dep.guardar(conn, doc, trozos, vectores, resultado)
+        guardado = dep.guardar(conn, doc, trozos, vectores, resultado)
     except _CONOCIDOS as e:
         return _error(conn, doc, dep, str(e))
     except Exception as e:  # noqa: BLE001 — un documento raro no puede dejarse en «procesando»
         log.exception("Fallo inesperado con el documento %s («%s»)", doc["id"], doc["nombre"])
         return _error(conn, doc, dep, f"Error inesperado al indexar ({type(e).__name__}: {e})")
+    if not guardado:
+        return "descartado"  # se borró mientras se indexaba; guardar.py ya lo dejó en el log
     log.info("Documento %s («%s») indexado: %d trozos en %.1f s",
              doc["id"], doc["nombre"], len(trozos), time.monotonic() - inicio)
     return "hecho"

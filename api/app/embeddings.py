@@ -29,7 +29,9 @@ class OllamaNoDisponible(EmbeddingsError):
 
 def vectorizar_pregunta(texto: str, url: str, modelo: str, cliente: httpx.Client | None = None) -> list[float]:
     """Vector de 1024 números de `texto`. `cliente` solo se pasa en los tests."""
-    cliente = cliente or httpx.Client(timeout=TIEMPO_MAX_S)
+    if cliente is None:
+        with httpx.Client(timeout=TIEMPO_MAX_S) as propio:  # se cierra al terminar: una conexión por pregunta
+            return vectorizar_pregunta(texto, url, modelo, propio)
     try:
         r = cliente.post(f"{url}/api/embed", json={"model": modelo, "input": [texto]})
     except httpx.HTTPError as e:

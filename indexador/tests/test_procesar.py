@@ -56,7 +56,9 @@ class Dobles:
     def guardar(self, conn, documento, trozos, vectores, resultado):
         self.llamadas.append(("guardar", documento["id"], [t.texto for t in trozos], len(vectores), resultado.version))
         self._quizas_falla("guardar")
-        return True
+        return self.guardado
+
+    guardado = True
 
     def marcar_error(self, conn, documento_id, motivo):
         self.llamadas.append(("error", documento_id, motivo))
@@ -126,3 +128,10 @@ def test_fallo_inesperado_tambien_queda_en_error_y_no_en_procesando():
     d = Dobles(fallo=KeyError("Page"), donde="trocear")
     assert procesar(CONN, doc(), CFG, d.dependencias()) == "error"
     assert d.llamadas[-1] == ("error", 7, "Error inesperado al indexar (KeyError: 'Page')")
+
+
+def test_documento_borrado_mientras_se_indexaba_queda_descartado_sin_error():
+    d = Dobles()
+    d.guardado = False  # guardar.py vio la clave foránea rota: el documento ya no existe
+    assert procesar(CONN, doc(), CFG, d.dependencias()) == "descartado"
+    assert "error" not in d.piezas()
