@@ -12,7 +12,7 @@ dependencia.
 Contrato (el frontend depende de él):
   GET    /api/proyectos            → 200 [{"id","nombre","tipo","descripcion","num_documentos"}] por nombre
   POST   /api/proyectos            {"nombre","tipo","descripcion"} → 201 proyecto · 409 nombre repetido
-  GET    /api/proyectos/{id}       → 200 proyecto + "documentos": [{"id","nombre","tamano","visible"}] · 404
+  GET    /api/proyectos/{id}       → 200 proyecto + "documentos": [{"id","nombre","tamano","visible","indexado"}] · 404
   PUT    /api/proyectos/{id}       {"nombre","tipo","descripcion"} → 200 proyecto · 404 · 409 nombre repetido
   DELETE /api/proyectos/{id}       → 204 (borra también sus documentos) · 404
   POST   /api/proyectos/{id}/documentos  multipart, campo "archivo" → 201 {"id","nombre","tamano"}

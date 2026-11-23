@@ -364,9 +364,10 @@ def create_project(conn, nombre: str, tipo: str | None, descripcion: str | None)
 
 
 def get_project(conn, proyecto_id: int) -> dict | None:
-    """Proyecto con la lista de sus documentos (id, nombre, tamaño en bytes); None si no existe.
+    """Proyecto con la lista de sus documentos (id, nombre, tamaño, estado de indexado); None si no existe.
 
     No carga el contenido de los documentos: el tamaño sale de octet_length en la propia bbdd.
+    Un documento sin fila en `indexado` está pendiente (el indexador aún no lo ha cogido).
     """
     row = conn.execute(
         "SELECT id, nombre, tipo, descripcion FROM proyectos WHERE id = %s", (proyecto_id,)
@@ -374,11 +375,15 @@ def get_project(conn, proyecto_id: int) -> dict | None:
     if row is None:
         return None
     docs = conn.execute(
-        "SELECT id, nombre, octet_length(contenido) FROM documentos WHERE proyecto_id = %s ORDER BY lower(nombre)",
+        "SELECT d.id, d.nombre, octet_length(d.contenido), coalesce(i.estado, 'pendiente'), i.error,"
+        " (SELECT count(*) FROM fragmentos f WHERE f.documento_id = d.id)"
+        " FROM documentos d LEFT JOIN indexado i ON i.documento_id = d.id"
+        " WHERE d.proyecto_id = %s ORDER BY lower(d.nombre)",
         (proyecto_id,),
     ).fetchall()
     return {"id": row[0], "nombre": row[1], "tipo": row[2], "descripcion": row[3],
-            "documentos": [{"id": d[0], "nombre": d[1], "tamano": d[2]} for d in docs]}
+            "documentos": [{"id": d[0], "nombre": d[1], "tamano": d[2],
+                            "indexado": {"estado": d[3], "error": d[4], "fragmentos": d[5]}} for d in docs]}
 
 
 def update_project(conn, proyecto_id: int, nombre: str, tipo: str | None, descripcion: str | None) -> dict | None:

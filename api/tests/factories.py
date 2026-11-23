@@ -65,6 +65,8 @@ class FakeDB:
         self.next_role_id = 1
         self.proyectos = {}  # id → {"nombre", "tipo", "descripcion"}
         self.documentos = {}  # id → {"proyecto_id", "nombre", "contenido"}
+        self.indexado = {}  # documento_id → {"estado", "error"}; sin entrada = pendiente
+        self.fragmentos = {}  # documento_id → número de trozos
         self.next_project_id = 1
         self.next_document_id = 1
 
@@ -203,7 +205,9 @@ class FakeDB:
         if pid not in self.proyectos:
             return None
         return {"id": pid, **self.proyectos[pid],
-                "documentos": [{"id": did, "nombre": d["nombre"], "tamano": len(d["contenido"])}
+                "documentos": [{"id": did, "nombre": d["nombre"], "tamano": len(d["contenido"]),
+                                "indexado": {**self.indexado.get(did, {"estado": "pendiente", "error": None}),
+                                             "fragmentos": self.fragmentos.get(did, 0)}}
                                for did, d in self._docs_de(pid)]}
 
     def update_project(self, conn, pid, nombre, tipo, descripcion):
