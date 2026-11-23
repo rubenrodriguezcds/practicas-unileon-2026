@@ -24,6 +24,10 @@ services:
       # La web habla con la bbdd por la red interna de compose: nombre del servicio y puerto de dentro
       DB_HOST: db
       DB_PORT: "5432"
+      # Buscador del asistente: Ollama por el túnel SSH abierto en el ordenador (ver indexador).
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11435}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "80:80"
     depends_on:

@@ -9,7 +9,7 @@ mitad de una petición. Ejemplo: `APP_SECRET` exige ≥ 32 caracteres, porque qu
 el secreto podría fabricar cookies de sesión de cualquier usuario.
 
 Quién lo usa: main.py (al crear la app), db.py (datos de conexión), captcha.py, mailer.py,
-migrations.py y routers/auth.py.
+migrations.py, routers/auth.py y routers/busqueda.py.
 
 Notas: los nombres de los campos coinciden con las variables sin distinguir mayúsculas
 (`postgres_db` ← `POSTGRES_DB`). Las variables que no aparecen aquí (SSH_*, etc.) se ignoran.
@@ -18,7 +18,7 @@ Notas: los nombres de los campos coinciden con las variables sin distinguir may�
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -63,6 +63,16 @@ class Settings(BaseSettings):
     # Tamaño máximo de un documento adjunto (routers/proyectos.py). Los documentos se guardan en
     # Postgres y se cargan enteros en memoria al subir y descargar, así que el límite es bajo.
     documento_max_mb: int = Field(default=50, ge=1)
+
+    # Buscador del asistente (routers/busqueda.py): Ollama con el mismo modelo de embeddings que el
+    # indexador. En desarrollo, el túnel SSH al servidor (ver .env.example).
+    ollama_url: str = "http://localhost:11434"
+    embeddings_modelo: str = "bge-m3"
+
+    @field_validator("ollama_url")
+    @classmethod
+    def _sin_barra_final(cls, v: str) -> str:
+        return v.rstrip("/")
 
     @model_validator(mode="after")
     def _clave_altcha(self):

@@ -67,6 +67,8 @@ class FakeDB:
         self.documentos = {}  # id → {"proyecto_id", "nombre", "contenido"}
         self.indexado = {}  # documento_id → {"estado", "error"}; sin entrada = pendiente
         self.fragmentos = {}  # documento_id → número de trozos
+        self.resultados_busqueda = []  # lo que devuelve search_fragments
+        self.busquedas = []  # (vector, texto, proyecto_id) de cada búsqueda
         self.next_project_id = 1
         self.next_document_id = 1
 
@@ -88,7 +90,7 @@ class FakeDB:
                      "update_project",
                      "add_document", "get_document", "delete_document",
                      "list_users", "get_user", "create_user", "update_user", "delete_users",
-                     "add_user_role", "remove_user_role"):
+                     "add_user_role", "remove_user_role", "search_fragments"):
             monkeypatch.setattr(db, name, getattr(self, name))
         return FakeConn(self)
 
@@ -298,3 +300,9 @@ class FakeDB:
     def remove_user_role(self, conn, user_id, rol_id):
         name, _ = self._by_id(user_id)
         self.asignaciones.discard((name, rol_id))
+
+    # --- Búsqueda (el SQL de verdad se prueba con la bbdd real) ---
+
+    def search_fragments(self, conn, vector, texto, proyecto_id, k=10):
+        self.busquedas.append((vector, texto, proyecto_id))
+        return self.resultados_busqueda[:k]

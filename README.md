@@ -193,6 +193,12 @@ python -c "import secrets;print(secrets.token_hex(32))"
 | ![GET](https://img.shields.io/badge/GET-61affe?style=flat-square) | `/api/documentos/{id}` (`?ver=1` para abrirlo en el navegador) | 200 el archivo · 404 · 303 al login si se abre desde el navegador sin sesión |
 | ![DELETE](https://img.shields.io/badge/DELETE-f93e3e?style=flat-square) | `/api/documentos/{id}` | 204 · 404 |
 
+**Buscador del asistente** (solo administrador; necesita Ollama, ver `OLLAMA_URL`):
+
+| Método | Ruta | Respuesta |
+|---|---|---|
+| ![GET](https://img.shields.io/badge/GET-61affe?style=flat-square) | `/api/busqueda?q=<pregunta>&proyecto_id=<opcional>` | 200 hasta 10 trozos de más a menos parecido (`documento`, `proyecto`, `titulos`, `paginas`, `texto`, `puntuacion_vector`, `puntuacion_texto`, `puntuacion`) · 422 pregunta vacía o de más de 500 caracteres · 502 Ollama da error (p. ej. modelo no descargado) · 503 Ollama no responde |
+
 > [!WARNING]
 > Si la base de datos no está disponible, la API responde **503** «Base de datos no disponible».
 
