@@ -47,10 +47,12 @@ indexador:  1. cola.coger              coge un pendiente (FOR UPDATE SKIP LOCKED
 | `docling_cliente.py` | Llamada a Docling; define `Trozo` y `Resultado` |
 | `visio.py` | Texto de las formas y conexiones «A → B» de un `.vsdx`, un trozo por página |
 | `embeddings.py` | Vectores de 1024 dimensiones con bge-m3 en Ollama (`/api/embed`, lotes de 16) |
+| `guardar.py` | Trozos y vectores a `fragmentos` y estado «hecho», en una transacción; descarta documentos borrados a mitad |
+| `procesar.py` | Une las piezas para un documento; cualquier fallo acaba en «error» con su motivo |
+| `main.py` | Bucle: coger → procesar; sobrevive a la bbdd caída y a la migración 005 aún sin aplicar |
 | `Dockerfile` | Python 3.12 + LibreOffice sin interfaz, sin root |
 
-Faltan `guardar.py`, `procesar.py` y `main.py` (el bucle), y el servicio
-`indexador` en el compose.
+Falta el servicio `indexador` en el compose.
 
 ## Pruebas
 
