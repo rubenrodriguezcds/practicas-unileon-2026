@@ -1,4 +1,4 @@
-# Imagen del contenedor `db`: PostgreSQL 16 oficial + servidor SSH.
+# Imagen del contenedor `db`: PostgreSQL 16 con pgvector + servidor SSH.
 #
 # Para qué: guardar los datos de la aplicación (tabla `usuarios`) y permitir entrar al
 # contenedor por SSH para administrarlo, como pide el enunciado.
@@ -9,7 +9,9 @@
 # Quién lo usa: docker-compose.yml (servicio db, `build: ./db`).
 #
 # Puertos: dentro, 5432 (Postgres) y 22 (SSH); el compose los publica como 1521 y 22.
-FROM postgres:16
+# pgvector/pgvector:pg16 es la Postgres 16 oficial con la extensión pgvector (vectores para el
+# asistente, migración 005): mismo formato de datos, no hace falta recrear el volumen.
+FROM pgvector/pgvector:pg16
 
 # SSH en el mismo contenedor (lo exige el enunciado); la imagen oficial no lo trae.
 # Se borran las claves de host del build para que cada contenedor genere las suyas al arrancar.
