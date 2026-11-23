@@ -13,7 +13,7 @@ se lo salte, así que se pueden lanzar varios sin que procesen el mismo. Al coge
 transacción y no deja bloqueos abiertos.
 
 Reintentos: un «error» vuelve a cogerse mientras `intentos < max_intentos`, esperando
-`intentos` minutos (si Docling u OpenAI están caídos no se gastan los tres intentos en segundos).
+`intentos` minutos (si Docling u Ollama están caídos no se gastan los tres intentos en segundos).
 Un «procesando» de más de `colgado_min` minutos se da por colgado (el indexador murió a mitad).
 
 Quién lo usa: main.py (coger), procesar.py (marcar_error) y guardar.py (marcar_hecho).

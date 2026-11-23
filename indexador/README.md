@@ -41,14 +41,15 @@ indexador:  1. cola.coger              coge un pendiente (FOR UPDATE SKIP LOCKED
 
 | Fichero | Para qué |
 |---|---|
-| `config.py` | Lee y valida el entorno (`POSTGRES_*`, `DB_HOST`, `DOCLING_URL`, `OPENAI_API_KEY`) |
+| `config.py` | Lee y valida el entorno (`POSTGRES_*`, `DB_HOST`, `DOCLING_URL`, `OLLAMA_URL`, `EMBEDDINGS_MODELO`) |
 | `cola.py` | Coger el siguiente documento y apuntar «hecho» o «error» |
 | `convertir.py` | Camino de cada tipo y conversión con LibreOffice |
 | `docling_cliente.py` | Llamada a Docling; define `Trozo` y `Resultado` |
 | `visio.py` | Texto de las formas y conexiones «A → B» de un `.vsdx`, un trozo por página |
+| `embeddings.py` | Vectores de 1024 dimensiones con bge-m3 en Ollama (`/api/embed`, lotes de 16) |
 | `Dockerfile` | Python 3.12 + LibreOffice sin interfaz, sin root |
 
-Faltan `embeddings.py`, `guardar.py`, `procesar.py` y `main.py` (el bucle), y el servicio
+Faltan `guardar.py`, `procesar.py` y `main.py` (el bucle), y el servicio
 `indexador` en el compose.
 
 ## Pruebas

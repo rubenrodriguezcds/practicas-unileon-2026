@@ -3,9 +3,9 @@
 Para qué: convierte las variables del `.env` (que docker compose inyecta) en un objeto `Config`.
 
 Por qué existe: es el ÚNICO sitio que lee el entorno (validar en la frontera). Si falta la
-conexión a la bbdd el indexador no arranca, con un error claro. Si falta OPENAI_API_KEY sí
-arranca: avisa en el log y cada documento queda en «error: falta OPENAI_API_KEY», visible en la
-ficha del proyecto (avisar, no bloquear).
+conexión a la bbdd el indexador no arranca, con un error claro. Ollama (embeddings) tiene valores
+por defecto: si no responde, el indexador arranca igual y cada documento queda reintentable y luego
+en «error» con el motivo, visible en la ficha del proyecto (avisar, no bloquear).
 
 Quién lo usa: main.py al arrancar.
 """
@@ -18,7 +18,8 @@ from urllib.parse import quote
 class Config:
     db_dsn: str
     docling_url: str
-    openai_api_key: str | None
+    ollama_url: str = "http://localhost:11434"   # en Docker con el túnel: http://host.docker.internal:11435
+    embeddings_modelo: str = "bge-m3"
     max_intentos: int = 3   # fallos seguidos antes de dejar el documento en «error»
     colgado_min: int = 30   # un «procesando» más antiguo se da por colgado y se reintenta
     espera_s: int = 5       # pausa cuando no hay nada que indexar
@@ -45,6 +46,7 @@ def leer_config(env: dict[str, str]) -> Config:
     return Config(
         db_dsn=dsn,
         docling_url=env.get("DOCLING_URL", "http://docling:5001").rstrip("/"),
-        openai_api_key=env.get("OPENAI_API_KEY") or None,
+        ollama_url=(env.get("OLLAMA_URL") or Config.ollama_url).rstrip("/"),
+        embeddings_modelo=env.get("EMBEDDINGS_MODELO") or Config.embeddings_modelo,
         **enteros,
     )
