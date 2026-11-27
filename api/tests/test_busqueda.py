@@ -11,7 +11,7 @@ doble que apunta con qué se le llamó. El SQL de la búsqueda híbrida se prueb
 import pytest
 from fastapi.testclient import TestClient
 
-from app import db, embeddings
+from app import db, embeddings, resumen
 from app.main import create_app
 from tests.factories import FakeDB, make_settings, solve_captcha
 
@@ -114,3 +114,76 @@ def test_error_de_ollama_502_con_su_mensaje(admin, monkeypatch):
     r = admin.get("/api/busqueda", params={"q": "migración"})
     assert r.status_code == 502
     assert r.json()["detail"] == "Ollama respondió 404: model 'bge-m3' not found"
+
+
+# --- resumen con IA: GET /api/busqueda/resumen ---
+
+@pytest.fixture
+def resumenes(monkeypatch):
+    """Sustituye al modelo: apunta (pregunta, trozos, url, modelo) y devuelve un texto fijo."""
+    hechas = []
+
+    def resumir(pregunta, trozos, url, modelo):
+        hechas.append((pregunta, trozos, url, modelo))
+        return "La migración costará 48.500 € [1]."
+
+    monkeypatch.setattr(resumen, "resumir", resumir)
+    return hechas
+
+
+def test_resumen_sin_sesion_401_y_usuario_normal_403(fake, monkeypatch, llamadas, resumenes):
+    assert cliente(fake, monkeypatch).get("/api/busqueda/resumen", params={"q": "x"}).status_code == 401
+    c = cliente(fake, monkeypatch, "pepe", "clave")
+    assert c.get("/api/busqueda/resumen", params={"q": "x"}).status_code == 403
+    assert resumenes == []
+
+
+@pytest.mark.parametrize("params", [{}, {"q": "  "}, {"q": "x" * 501}])
+def test_resumen_pregunta_vacia_o_larga_422(admin, resumenes, params):
+    assert admin.get("/api/busqueda/resumen", params=params).status_code == 422
+    assert resumenes == []
+
+
+def test_resumen_con_los_primeros_trozos_de_la_misma_busqueda(admin, fake, resumenes):
+    fake.resultados_busqueda = [{**RESULTADO, "documento_id": n} for n in range(10)]
+    r = admin.get("/api/busqueda/resumen", params={"q": " ¿cuánto cuesta? ", "proyecto_id": 3})
+    assert r.status_code == 200
+    assert r.json() == {"resumen": "La migración costará 48.500 € [1].", "fuentes": 4, "encontrado": True}
+    pregunta, trozos, url, modelo = resumenes[0]
+    # Los mismos 4 primeros que pinta la página: así [1]…[4] señalan a los resultados de arriba.
+    assert pregunta == "¿cuánto cuesta?" and [t["documento_id"] for t in trozos] == [0, 1, 2, 3]
+    assert (url, modelo) == ("http://ollama:11434", "gemma4:e2b")
+    assert fake.busquedas == [(VECTOR, "¿cuánto cuesta?", 3)]
+
+
+def test_resumen_sin_resultados_no_llama_al_modelo(admin, fake, resumenes):
+    fake.resultados_busqueda = []
+    assert admin.get("/api/busqueda/resumen", params={"q": "tortilla"}).json() == {
+        "resumen": None, "fuentes": 0, "encontrado": False}
+    assert resumenes == []
+
+
+def test_resumen_que_no_encuentra_la_respuesta_lo_marca(admin, fake, monkeypatch):
+    fake.resultados_busqueda = [RESULTADO]
+    monkeypatch.setattr(resumen, "resumir", lambda *a: "No lo encuentro en los documentos.")
+    assert admin.get("/api/busqueda/resumen", params={"q": "¿quién ganó el mundial?"}).json() == {
+        "resumen": "No lo encuentro en los documentos.", "fuentes": 1, "encontrado": False}
+
+
+def test_resumen_modelo_caido_503(admin, monkeypatch):
+    def caido(pregunta, trozos, url, modelo):
+        raise resumen.ResumenNoDisponible("Ollama no responde en http://ollama:11434 (ReadTimeout)")
+
+    monkeypatch.setattr(resumen, "resumir", caido)
+    r = admin.get("/api/busqueda/resumen", params={"q": "migración"})
+    assert r.status_code == 503
+    assert r.json()["detail"] == "El resumen no está disponible: Ollama no responde en http://ollama:11434 (ReadTimeout)"
+
+
+def test_resumen_error_del_modelo_502(admin, monkeypatch):
+    def sin_modelo(pregunta, trozos, url, modelo):
+        raise resumen.ResumenError("Ollama respondió 404: model 'gemma4:e2b' not found")
+
+    monkeypatch.setattr(resumen, "resumir", sin_modelo)
+    r = admin.get("/api/busqueda/resumen", params={"q": "migración"})
+    assert r.status_code == 502 and "not found" in r.json()["detail"]

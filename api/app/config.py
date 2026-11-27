@@ -68,6 +68,8 @@ class Settings(BaseSettings):
     # indexador. En desarrollo, el túnel SSH al servidor (ver .env.example).
     ollama_url: str = "http://localhost:11434"
     embeddings_modelo: str = "bge-m3"
+    # Resumen con IA del buscador (app/resumen.py): modelo de chat en el mismo Ollama.
+    chat_modelo: str = "gemma4:e2b"
 
     @field_validator("ollama_url")
     @classmethod

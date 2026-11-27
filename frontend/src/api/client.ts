@@ -326,3 +326,21 @@ export async function searchFragments(q: string, proyectoId: number | null): Pro
   if (proyectoId !== null) params.set('proyecto_id', String(proyectoId))
   return (await request(`/api/busqueda?${params}`)).json()
 }
+
+/**
+ * Resumen con IA de una búsqueda: `resumen` cita [1]…[fuentes], que son los primeros resultados
+ * de searchFragments con la misma pregunta. `resumen` es null si no hay resultados.
+ * `encontrado` es false si el modelo dice que la respuesta no está en los documentos.
+ */
+export type ResumenBusqueda = { resumen: string | null; fuentes: number; encontrado: boolean }
+
+/**
+ * Resumen con IA de los trozos encontrados (GET /api/busqueda/resumen). Tarda segundos (lo escribe el
+ * modelo), por eso va aparte de searchFragments.
+ * @throws {ApiError} 503 si Ollama no responde, 502 si responde con error.
+ */
+export async function summarizeSearch(q: string, proyectoId: number | null): Promise<ResumenBusqueda> {
+  const params = new URLSearchParams({ q })
+  if (proyectoId !== null) params.set('proyecto_id', String(proyectoId))
+  return (await request(`/api/busqueda/resumen?${params}`)).json()
+}

@@ -99,4 +99,14 @@ td.acciones a { align-self: center; font-size: 0.9rem; }
 .resultado header a { color: #2563eb; font-weight: 600; }
 .resultado .seccion { color: #4b5563; font-size: 0.85rem; }
 .resultado .trozo { margin: 0; white-space: pre-wrap; font-size: 0.95rem; }
+.resultado .numero { color: #4b5563; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+.resultado.resaltado { border-color: #2563eb; box-shadow: 0 0 0 2px #bfdbfe; }
+.resumen-ia { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 1rem; padding: 0.9rem 1rem; border: 1px solid #c7d2fe; border-radius: 0.5rem; background: #eef2ff; }
+.resumen-ia h2 { margin: 0; font-size: 0.95rem; color: #3730a3; }
+.resumen-ia .texto { margin: 0; line-height: 1.55; }
+.resumen-ia .aviso { margin: 0; color: #4b5563; font-size: 0.8rem; }
+.resumen-ia .citas { display: inline-flex; gap: 0.2rem; margin: 0 0.15rem; vertical-align: 0.1em; }
+.resumen-ia .cita { padding: 0 0.4rem; min-width: 1.4rem; border: 1px solid #a5b4fc; border-radius: 999px; background: #fff; color: #3730a3; font-size: 0.75rem; line-height: 1.4; cursor: pointer; }
+.resumen-ia .cita:hover, .resumen-ia .cita:focus-visible { background: #e0e7ff; outline: 2px solid #6366f1; outline-offset: 1px; }
+.poco-relevantes summary { cursor: pointer; color: #4b5563; margin-bottom: 0.75rem; }
 .resultado .puntuaciones { color: #4b5563; font-size: 0.8rem; font-variant-numeric: tabular-nums; }

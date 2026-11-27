@@ -123,6 +123,7 @@ docker compose ps             # db (healthy) y web (Up)
 | `SMTP_TLS` | `starttls` (puerto 587, Brevo y Gmail; por defecto), `ssl` (465) o `none` |
 | `OLLAMA_URL` | Dónde está Ollama (embeddings del asistente). En desarrollo, el túnel SSH al servidor: `http://host.docker.internal:11435` (por defecto); en el servidor, `http://localhost:11434` |
 | `EMBEDDINGS_MODELO` | Modelo de embeddings en Ollama. Por defecto `bge-m3` (1024 dimensiones, el tamaño de la tabla) |
+| `CHAT_MODELO` | Modelo de chat en Ollama para el resumen con IA del buscador. Por defecto `gemma4:e2b` |
 
 Para generar un `APP_SECRET` o un `ALTCHA_HMAC_KEY`:
 
@@ -228,6 +229,7 @@ python -c "import secrets;print(secrets.token_hex(32))"
 | Método | Ruta | Respuesta |
 |---|---|---|
 | ![GET](https://img.shields.io/badge/GET-61affe?style=flat-square) | `/api/busqueda?q=<pregunta>&proyecto_id=<opcional>` | 200 hasta 10 trozos de más a menos parecido (`documento`, `proyecto`, `titulos`, `paginas`, `texto`, `puntuacion_vector`, `puntuacion_texto`, `puntuacion`) · 422 pregunta vacía o de más de 500 caracteres · 502 Ollama da error (p. ej. modelo no descargado) · 503 Ollama no responde |
+| ![GET](https://img.shields.io/badge/GET-61affe?style=flat-square) | `/api/busqueda/resumen?q=<pregunta>&proyecto_id=<opcional>` | 200 `{"resumen", "fuentes"}`: párrafo de IA que cita `[1]`…`[n]`, los `n` primeros resultados de la misma búsqueda (`resumen: null` si no hay resultados, sin llamar al modelo) · mismos 422 · 502/503 si falla Ollama |
 
 > [!WARNING]
 > Si la base de datos no está disponible, la API responde **503** «Base de datos no disponible».
