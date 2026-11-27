@@ -344,3 +344,64 @@ export async function summarizeSearch(q: string, proyectoId: number | null): Pro
   if (proyectoId !== null) params.set('proyecto_id', String(proyectoId))
   return (await request(`/api/busqueda/resumen?${params}`)).json()
 }
+
+// --- Validaciones de contenido por proyecto ---
+
+/** Trozo que demuestra lo que pide una validación. */
+export type PruebaValidacion = { documento_id: number; documento: string; paginas: number[]; texto: string }
+
+/**
+ * Último resultado de una validación. `pruebas`: un patrón, el primer trozo de cada documento donde
+ * aparece; la IA, los trozos que cita. `resumen`: solo en las de IA que se cumplen.
+ */
+export type ResultadoValidacion = {
+  estado: 'ok' | 'falla' | 'error'
+  explicacion: string | null
+  resumen: string | null
+  ejecutada: string
+  pruebas: PruebaValidacion[]
+}
+
+/** Una validación: un patrón de texto o una pregunta a la IA, con su último resultado (null = sin validar). */
+export type Validacion = {
+  id: number
+  proyecto_id: number
+  nombre: string
+  tipo: 'patron' | 'ia'
+  criterio: string
+  orden: number
+  resultado: ResultadoValidacion | null
+}
+
+export type ValidacionIn = { nombre: string; tipo: 'patron' | 'ia'; criterio: string }
+
+/** Validaciones de un proyecto, en orden (GET /api/proyectos/{id}/validaciones). */
+export async function listValidations(proyectoId: number): Promise<Validacion[]> {
+  return (await request(`/api/proyectos/${proyectoId}/validaciones`)).json()
+}
+
+/**
+ * Añade una validación al proyecto (POST /api/proyectos/{id}/validaciones).
+ * @throws {ApiError} 422 si el patrón no es una expresión regular válida; la pantalla muestra el mensaje.
+ */
+export async function createValidation(proyectoId: number, v: ValidacionIn): Promise<Validacion> {
+  return (await request(`/api/proyectos/${proyectoId}/validaciones`, { method: 'POST', body: JSON.stringify(v) })).json()
+}
+
+/** Cambia una validación (PUT /api/validaciones/{id}); su resultado anterior se borra. */
+export async function updateValidation(id: number, v: ValidacionIn): Promise<Validacion> {
+  return (await request(`/api/validaciones/${id}`, { method: 'PUT', body: JSON.stringify(v) })).json()
+}
+
+/** Borra una validación (DELETE /api/validaciones/{id}). */
+export async function deleteValidation(id: number): Promise<void> {
+  await request(`/api/validaciones/${id}`, { method: 'DELETE' })
+}
+
+/**
+ * Ejecuta una validación y devuelve su resultado nuevo (POST /api/validaciones/{id}/ejecutar).
+ * Las de IA tardan ~1 min. Si Ollama falla, el resultado vuelve con estado «error» y el motivo.
+ */
+export async function runValidation(id: number): Promise<Validacion> {
+  return (await request(`/api/validaciones/${id}/ejecutar`, { method: 'POST' })).json()
+}

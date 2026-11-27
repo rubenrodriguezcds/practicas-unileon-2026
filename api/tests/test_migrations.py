@@ -100,3 +100,17 @@ def test_migracion_005_es_idempotente():
     # Borrar un documento o un proyecto arrastra su estado y sus trozos; el vector es de 1024.
     code = "\n".join(line.split("--")[0] for line in sql.splitlines())
     assert code.count("ON DELETE CASCADE") == 3 and "halfvec(1024)" in code
+
+
+def test_migracion_006_es_idempotente():
+    sql = (MIGRATIONS_DIR / "006_validaciones.sql").read_text(encoding="utf-8")
+    for s in sql.split(";"):
+        code = "\n".join(line for line in s.splitlines() if not line.strip().startswith("--")).strip()
+        if code.startswith(("CREATE", "ALTER")):
+            assert "IF NOT EXISTS" in code, code
+    # Borrar un proyecto arrastra sus validaciones, y una validación su resultado; si se borra el
+    # trozo que era la prueba, el resultado se queda sin prueba (no se borra).
+    code = "\n".join(line.split("--")[0] for line in sql.splitlines())
+    # Las pruebas (trozos) de un resultado se van con él, y si se borra o reindexa su documento.
+    assert code.count("ON DELETE CASCADE") == 4
+    assert "CHECK (tipo IN ('patron', 'ia'))" in code

@@ -18,8 +18,9 @@ Contrato (la página «Buscador» depende de él):
     → 200 {"resumen": str | null, "fuentes": n, "encontrado": bool}: párrafo de IA que cita
       [1]…[n], los n primeros resultados de la misma búsqueda (los de arriba de la página);
       `encontrado` es false si el modelo dice que la respuesta no está (la página pliega entonces
-      los resultados). Sin resultados: resumen null y encontrado false, sin llamar al modelo. Va aparte de la búsqueda para que los resultados salgan al instante y el
-      resumen (segundos) llegue después.
+      los resultados). Sin resultados: resumen null y encontrado false, sin llamar al modelo. Va
+      aparte de la búsqueda para que los resultados salgan al instante y el resumen (segundos)
+      llegue después.
     · mismos 401/403/422 · 503/502 si falla Ollama (embeddings o modelo de chat)
 
 Solo el administrador, como el resto de pantallas de proyectos: aún no hay permisos por proyecto,

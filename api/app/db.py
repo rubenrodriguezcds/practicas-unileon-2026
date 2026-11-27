@@ -476,7 +476,7 @@ WITH sig AS (
         WHERE f.busqueda @@ b.q AND (%(pid)s::int IS NULL OR f.proyecto_id = %(pid)s)
         ORDER BY rango DESC LIMIT 30) p
 )
-SELECT f.documento_id, d.nombre, f.proyecto_id, pr.nombre, f.titulos, f.paginas, f.texto,
+SELECT f.documento_id, d.nombre, f.proyecto_id, pr.nombre, f.titulos, f.paginas, f.texto, f.id,
        sig.sim, pal.rango,
        coalesce(1.0 / (60 + sig.puesto), 0) + coalesce(1.0 / (60 + pal.puesto), 0) AS puntuacion
 FROM (SELECT id FROM sig UNION SELECT id FROM pal) ids
@@ -493,16 +493,184 @@ LIMIT %(k)s
 def search_fragments(conn, vector: list[float], texto: str, proyecto_id: int | None, k: int = 10) -> list[dict]:
     """Los `k` trozos más parecidos a la pregunta (vector + texto), de todos los proyectos o de uno.
 
+    `fragmento_id` es el id del trozo.
     `puntuacion_vector` es el coseno (1 = idéntico) y `puntuacion_texto` el ts_rank; None si el
     trozo no salió en ese ranking. `puntuacion` es la combinada (RRF), por la que se ordena.
     """
     filas = conn.execute(_BUSCAR, {"vec": "[" + ",".join(str(x) for x in vector) + "]",
                                    "texto": texto, "pid": proyecto_id, "k": k}).fetchall()
     return [{"documento_id": r[0], "documento": r[1], "proyecto_id": r[2], "proyecto": r[3],
-             "titulos": r[4], "paginas": r[5], "texto": r[6],
-             "puntuacion_vector": _redondear(r[7]), "puntuacion_texto": _redondear(r[8]),
-             "puntuacion": _redondear(r[9])} for r in filas]
+             "titulos": r[4], "paginas": r[5], "texto": r[6], "fragmento_id": r[7],
+             "puntuacion_vector": _redondear(r[8]), "puntuacion_texto": _redondear(r[9]),
+             "puntuacion": _redondear(r[10])} for r in filas]
 
 
 def _redondear(x) -> float | None:
     return None if x is None else round(float(x), 4)
+
+
+# --- Validaciones de contenido por proyecto ---
+
+_VALIDACION = "v.id, v.proyecto_id, v.nombre, v.tipo, v.criterio, v.orden"
+# Las pruebas van en una lista JSON (en su orden) para traer cada validación en una sola fila.
+_RESULTADO = (
+    "r.estado, r.explicacion, r.resumen, r.ejecutada, r.validacion_id,"
+    " (SELECT coalesce(json_agg(json_build_object('documento_id', f.documento_id, 'documento', d.nombre,"
+    "  'paginas', f.paginas, 'texto', f.texto) ORDER BY p.orden), '[]')"
+    "  FROM validacion_pruebas p JOIN fragmentos f ON f.id = p.fragmento_id"
+    "  JOIN documentos d ON d.id = f.documento_id WHERE p.validacion_id = v.id)"
+)
+
+
+def _validacion(row) -> dict:
+    """Fila de `_VALIDACION` + `_RESULTADO` → validación con su último resultado (o None)."""
+    v = {"id": row[0], "proyecto_id": row[1], "nombre": row[2], "tipo": row[3], "criterio": row[4],
+         "orden": row[5], "resultado": None}
+    if len(row) > 6 and row[10] is not None:  # hay fila en validacion_resultados
+        v["resultado"] = {"estado": row[6], "explicacion": row[7], "resumen": row[8],
+                          "ejecutada": row[9].isoformat(), "pruebas": row[11]}
+    return v
+
+
+def patron_valido(conn, patron: str) -> str | None:
+    """None si Postgres acepta el patrón como expresión regular; si no, su mensaje de error.
+
+    Lo comprueba la propia Postgres porque es quien lo ejecuta y su sintaxis no es la de Python
+    (p. ej. `\\m` y `\\M` son inicio y fin de palabra).
+    """
+    try:
+        conn.execute("SELECT '' ~* unaccent(%s)", (patron,))
+    except psycopg.errors.InvalidRegularExpression as e:
+        conn.rollback()
+        return str(e.diag.message_primary or e)
+    return None
+
+
+def list_validations(conn, proyecto_id: int) -> list[dict] | None:
+    """Validaciones del proyecto en orden, con su último resultado y su prueba; None si el proyecto no existe."""
+    if conn.execute("SELECT 1 FROM proyectos WHERE id = %s", (proyecto_id,)).fetchone() is None:
+        return None
+    rows = conn.execute(
+        f"SELECT {_VALIDACION}, {_RESULTADO} FROM validaciones v"
+        " LEFT JOIN validacion_resultados r ON r.validacion_id = v.id"
+        " WHERE v.proyecto_id = %s ORDER BY v.orden, v.id",
+        (proyecto_id,),
+    ).fetchall()
+    return [_validacion(r) for r in rows]
+
+
+def create_validation(conn, proyecto_id: int, nombre: str, tipo: str, criterio: str) -> dict | None:
+    """Añade una validación al final del proyecto; None si el proyecto no existe."""
+    try:
+        row = conn.execute(
+            "INSERT INTO validaciones (proyecto_id, nombre, tipo, criterio, orden)"
+            " SELECT %s, %s, %s, %s, coalesce(max(orden), 0) + 1 FROM validaciones WHERE proyecto_id = %s"
+            f" RETURNING {_VALIDACION.replace('v.', '')}",
+            (proyecto_id, nombre, tipo, criterio, proyecto_id),
+        ).fetchone()
+    except psycopg.errors.ForeignKeyViolation:
+        conn.rollback()
+        return None
+    conn.commit()
+    return _validacion(row)
+
+
+def update_validation(conn, validacion_id: int, nombre: str, tipo: str, criterio: str) -> dict | None:
+    """Cambia una validación y borra su resultado (ya no corresponde); None si no existe."""
+    row = conn.execute(
+        "UPDATE validaciones SET nombre = %s, tipo = %s, criterio = %s WHERE id = %s"
+        f" RETURNING {_VALIDACION.replace('v.', '')}",
+        (nombre, tipo, criterio, validacion_id),
+    ).fetchone()
+    if row is not None:
+        conn.execute("DELETE FROM validacion_resultados WHERE validacion_id = %s", (validacion_id,))
+    conn.commit()
+    return _validacion(row) if row else None
+
+
+def delete_validation(conn, validacion_id: int) -> bool:
+    """Borra una validación (y su resultado, en cascada). False si no existía."""
+    borrada = conn.execute("DELETE FROM validaciones WHERE id = %s RETURNING id", (validacion_id,)).fetchone()
+    conn.commit()
+    return borrada is not None
+
+
+class PatronNoValido(Exception):
+    """Postgres no acepta la expresión regular (el mensaje es el suyo)."""
+
+
+def get_validation(conn, validacion_id: int) -> dict | None:
+    """Una validación con su último resultado y su prueba; None si no existe."""
+    row = conn.execute(
+        f"SELECT {_VALIDACION}, {_RESULTADO} FROM validaciones v"
+        " LEFT JOIN validacion_resultados r ON r.validacion_id = v.id"
+        " WHERE v.id = %s",
+        (validacion_id,),
+    ).fetchone()
+    return _validacion(row) if row else None
+
+
+def run_pattern(conn, proyecto_id: int, patron: str) -> dict:
+    """Busca el patrón en los trozos del proyecto, sin distinguir mayúsculas ni acentos.
+
+    `unaccent` en los dos lados: «migracion» encuentra «MIGRACIÓN», como en el buscador. Solo
+    quita tildes y diéresis de las letras, así que no cambia el resto de la expresión regular.
+
+    Devuelve {"trozos", "documentos"} que coinciden, "fragmentos": el primer trozo de cada documento
+    donde aparece (las pruebas, en orden de documento), y cuántos documentos del proyecto están
+    "indexados" y cuántos "pendientes" (aún sin trozos: pendientes, indexándose o con error).
+
+    Raises:
+        PatronNoValido: si Postgres no acepta el patrón.
+    """
+    try:
+        filas = conn.execute(
+            "SELECT DISTINCT ON (documento_id) id, count(*) OVER (PARTITION BY documento_id)"
+            " FROM fragmentos WHERE proyecto_id = %s AND unaccent(texto) ~* unaccent(%s)"
+            " ORDER BY documento_id, orden",
+            (proyecto_id, patron),
+        ).fetchall()
+    except psycopg.errors.InvalidRegularExpression as e:
+        conn.rollback()
+        raise PatronNoValido(str(e.diag.message_primary or e)) from None
+    return {"trozos": sum(f[1] for f in filas), "documentos": len(filas), "fragmentos": [f[0] for f in filas],
+            **document_counts(conn, proyecto_id)}
+
+
+def document_counts(conn, proyecto_id: int) -> dict:
+    """Documentos del proyecto ya «indexados» y «pendientes» (aún sin trozos: pendientes, indexándose o con error)."""
+    indexados, pendientes = conn.execute(
+        "SELECT count(*) FILTER (WHERE i.estado = 'hecho'), count(*) FILTER (WHERE i.estado IS DISTINCT FROM 'hecho')"
+        " FROM documentos d LEFT JOIN indexado i ON i.documento_id = d.id WHERE d.proyecto_id = %s",
+        (proyecto_id,),
+    ).fetchone()
+    return {"indexados": indexados, "pendientes": pendientes}
+
+
+def save_result(conn, validacion_id: int, estado: str, explicacion: str, fragmentos: list[int],
+                resumen: str | None = None) -> None:
+    """Guarda el resultado de una validación con sus pruebas (en orden), sustituyendo al anterior."""
+    conn.execute(
+        "INSERT INTO validacion_resultados (validacion_id, estado, explicacion, resumen) VALUES (%s, %s, %s, %s)"
+        " ON CONFLICT (validacion_id) DO UPDATE SET estado = EXCLUDED.estado, explicacion = EXCLUDED.explicacion,"
+        " resumen = EXCLUDED.resumen, ejecutada = now()",
+        (validacion_id, estado, explicacion, resumen),
+    )
+    conn.execute("DELETE FROM validacion_pruebas WHERE validacion_id = %s", (validacion_id,))
+    with conn.cursor() as cur:
+        cur.executemany("INSERT INTO validacion_pruebas (validacion_id, fragmento_id, orden) VALUES (%s, %s, %s)",
+                        [(validacion_id, f, i) for i, f in enumerate(fragmentos)])
+    conn.commit()
+
+
+def get_fragments(conn, ids: list[int]) -> list[dict]:
+    """Trozos por id, en el orden pedido: {"documento", "paginas", "texto"} (los que ya no existan se saltan)."""
+    if not ids:
+        return []
+    filas = conn.execute(
+        "SELECT f.id, d.nombre, f.paginas, f.texto FROM fragmentos f JOIN documentos d ON d.id = f.documento_id"
+        " WHERE f.id = ANY(%s)",
+        (ids,),
+    ).fetchall()
+    por_id = {r[0]: {"documento": r[1], "paginas": r[2], "texto": r[3]} for r in filas}
+    return [por_id[i] for i in ids if i in por_id]

@@ -70,6 +70,10 @@ class Settings(BaseSettings):
     embeddings_modelo: str = "bge-m3"
     # Resumen con IA del buscador (app/resumen.py): modelo de chat en el mismo Ollama.
     chat_modelo: str = "gemma4:e2b"
+    # Validaciones con IA (routers/validaciones.py): parecido mínimo (coseno) para que un trozo se le
+    # pase al modelo. Bajo a propósito: solo descarta lo claramente ajeno (p. ej. ~0,3 en las pruebas);
+    # con trozos cortos el parecido no separa bien lo relevante, y eso lo decide el modelo leyéndolos.
+    validacion_umbral: float = Field(default=0.35, ge=0, le=1)
 
     @field_validator("ollama_url")
     @classmethod
