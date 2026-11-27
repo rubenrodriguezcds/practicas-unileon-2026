@@ -1,0 +1,68 @@
+{
+  "informe.pdf": [
+    "Proyecto Ficticio Alfa",
+    "La migración de los servidores del año 2027 se hará en tres fases y costará 48.500 € según la estimación de configuración inicial.",
+    "El riesgo principal es la caída del servicio de facturación durante la ventana nocturna.",
+    "Equipo Sur",
+    "6 semanas"
+  ],
+  "informe_con_bordes.pdf": [
+    "Proyecto Ficticio Alfa",
+    "La migración de los servidores del año 2027 se hará en tres fases y costará 48.500 € según la estimación de configuración inicial.",
+    "El riesgo principal es la caída del servicio de facturación durante la ventana nocturna.",
+    "Equipo Sur",
+    "6 semanas"
+  ],
+  "acta_escaneada.pdf": [
+    "Acta de reunión del Proyecto Ficticio Alfa",
+    "Fecha: 3 de marzo de 2027",
+    "Se aprueba el presupuesto de 48.500 euros.",
+    "Próxima revisión: después de la fase de migración."
+  ],
+  "memoria.docx": [
+    "Proyecto Ficticio Alfa",
+    "La migración de los servidores del año 2027 se hará en tres fases y costará 48.500 € según la estimación de configuración inicial.",
+    "El riesgo principal es la caída del servicio de facturación durante la ventana nocturna.",
+    "Equipo Norte",
+    "4 semanas"
+  ],
+  "presentacion.pptx": [
+    "Proyecto Ficticio Alfa",
+    "Reducir el consumo eléctrico un 30 %",
+    "Unificar la monitorización en un único panel",
+    "Equipo Este",
+    "Balanceador",
+    "Base de datos"
+  ],
+  "presupuesto.xlsx": [
+    "Licencias",
+    "30500",
+    "Formación"
+  ],
+  "arquitectura.vsdx": [
+    "Usuarios",
+    "Portal de facturación",
+    "Base de datos de clientes"
+  ],
+  "acta_escaneada.png": [
+    "Acta de reunión del Proyecto Ficticio Alfa",
+    "Fecha: 3 de marzo de 2027",
+    "Se aprueba el presupuesto de 48.500 euros.",
+    "Próxima revisión: después de la fase de migración."
+  ],
+  "memoria.doc": [
+    "Proyecto Ficticio Alfa",
+    "La migración de los servidores del año 2027 se hará en tres fases y costará 48.500 € según la estimación de configuración inicial.",
+    "El riesgo principal es la caída del servicio de facturación durante la ventana nocturna.",
+    "Equipo Norte",
+    "4 semanas"
+  ],
+  "presentacion.ppt": [
+    "Proyecto Ficticio Alfa",
+    "Reducir el consumo eléctrico un 30 %",
+    "Unificar la monitorización en un único panel",
+    "Equipo Este",
+    "Balanceador",
+    "Base de datos"
+  ]
+}

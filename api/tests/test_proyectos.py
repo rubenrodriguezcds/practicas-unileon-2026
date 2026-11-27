@@ -131,10 +131,33 @@ def test_detalle_con_documentos_por_nombre_y_visibles(admin, fake):
     assert r.json() == {
         "id": pid, "nombre": "Web", "tipo": None, "descripcion": None,
         "documentos": [
-            {"id": 2, "nombre": "a.pdf", "tamano": 4, "visible": True},
-            {"id": 1, "nombre": "b.docx", "tamano": 5, "visible": False},
+            {"id": 2, "nombre": "a.pdf", "tamano": 4, "visible": True, "indexado": PENDIENTE},
+            {"id": 1, "nombre": "b.docx", "tamano": 5, "visible": False, "indexado": PENDIENTE},
         ],
     }
+
+
+PENDIENTE = {"estado": "pendiente", "error": None, "fragmentos": 0}
+
+
+def test_detalle_documento_sin_indexar_sale_pendiente(admin, fake):
+    pid = fake.add_project("Web", {"a.pdf": b"%PDF"})
+    assert admin.get(f"/api/proyectos/{pid}").json()["documentos"][0]["indexado"] == PENDIENTE
+
+
+def test_detalle_documento_indexado_cuenta_sus_trozos(admin, fake):
+    pid = fake.add_project("Web", {"a.pdf": b"%PDF"})
+    fake.indexado[1] = {"estado": "hecho", "error": None}
+    fake.fragmentos[1] = 7
+    assert admin.get(f"/api/proyectos/{pid}").json()["documentos"][0]["indexado"] == {
+        "estado": "hecho", "error": None, "fragmentos": 7}
+
+
+def test_detalle_documento_con_error_muestra_el_motivo(admin, fake):
+    pid = fake.add_project("Web", {"a.pdf": b"%PDF"})
+    fake.indexado[1] = {"estado": "error", "error": "Docling no responde"}
+    assert admin.get(f"/api/proyectos/{pid}").json()["documentos"][0]["indexado"] == {
+        "estado": "error", "error": "Docling no responde", "fragmentos": 0}
 
 
 def test_detalle_inexistente_es_404(admin):

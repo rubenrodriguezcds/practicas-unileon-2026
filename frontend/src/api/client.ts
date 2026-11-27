@@ -226,8 +226,14 @@ export async function removeUserRole(id: number, rolId: number): Promise<void> {
 /** Proyecto del listado; `num_documentos` es cuántos documentos tiene adjuntos. */
 export type Proyecto = { id: number; nombre: string; tipo: string | null; descripcion: string | null; num_documentos: number }
 
+/**
+ * En qué punto está el indexado de un documento para el asistente: `pendiente` (el indexador aún no
+ * lo ha cogido), `procesando`, `hecho` (con `fragmentos` trozos) o `error` (con el motivo).
+ */
+export type Indexado = { estado: 'pendiente' | 'procesando' | 'hecho' | 'error'; error: string | null; fragmentos: number }
+
 /** Documento adjunto a un proyecto; `tamano` en bytes y `visible` si el navegador puede mostrarlo. */
-export type Documento = { id: number; nombre: string; tamano: number; visible: boolean }
+export type Documento = { id: number; nombre: string; tamano: number; visible: boolean; indexado: Indexado }
 
 /** Proyecto con sus documentos (GET /api/proyectos/{id}). */
 export type ProyectoDetalle = Omit<Proyecto, 'num_documentos'> & { documentos: Documento[] }
@@ -275,7 +281,7 @@ export async function deleteProject(id: number): Promise<void> {
  * Sube un documento a un proyecto (POST /api/proyectos/{id}/documentos, multipart con el campo `archivo`).
  * @throws {ApiError} 409 si ya hay uno con ese nombre en el proyecto; 413 si pasa del tamaño máximo.
  */
-export async function uploadDocument(proyectoId: number, file: File): Promise<Omit<Documento, 'visible'>> {
+export async function uploadDocument(proyectoId: number, file: File): Promise<Omit<Documento, 'visible' | 'indexado'>> {
   const body = new FormData()
   body.append('archivo', file)
   const res = await request(`/api/proyectos/${proyectoId}/documentos`, { method: 'POST', body })
@@ -293,4 +299,30 @@ export async function deleteDocument(id: number): Promise<void> {
 /** URL del documento: con `ver` se abre en el navegador (?ver=1) y sin él se descarga. */
 export function documentUrl(id: number, ver: boolean): string {
   return `/api/documentos/${id}${ver ? '?ver=1' : ''}`
+}
+
+// --- Buscador del asistente (fase 1: buscador de prueba) ---
+
+/** Un trozo encontrado. Las puntuaciones son null si el trozo no salió en ese ranking. */
+export type ResultadoBusqueda = {
+  documento_id: number
+  documento: string
+  proyecto_id: number
+  proyecto: string
+  titulos: string[]
+  paginas: number[]
+  texto: string
+  puntuacion_vector: number | null
+  puntuacion_texto: number | null
+  puntuacion: number
+}
+
+/**
+ * Trozos de documentos más parecidos a la pregunta (GET /api/busqueda), de todos los proyectos o de uno.
+ * @throws {ApiError} 503 si Ollama no responde, 502 si responde con error; la pantalla muestra el mensaje.
+ */
+export async function searchFragments(q: string, proyectoId: number | null): Promise<ResultadoBusqueda[]> {
+  const params = new URLSearchParams({ q })
+  if (proyectoId !== null) params.set('proyecto_id', String(proyectoId))
+  return (await request(`/api/busqueda?${params}`)).json()
 }

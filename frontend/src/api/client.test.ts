@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ApiError, addUserRole, createProject, createRole, createUser, deleteDocument, deleteProject, deleteRole,
   deleteUser, deleteUsers, documentUrl, getProject, getUser, listProjects, listRoles, listUsers, login, me,
-  removeUserRole, resetPassword, roleUsers, updateProject, updateRole, updateUser, uploadDocument,
+  removeUserRole, resetPassword, roleUsers, searchFragments, updateProject, updateRole, updateUser, uploadDocument,
 } from './client'
 
 // Crea un `fetch` simulado que responde con el status y el cuerpo JSON dados.
@@ -273,5 +273,29 @@ describe('client: proyectos y documentos', () => {
   it('documentUrl añade ?ver=1 solo para verlo en el navegador', () => {
     expect(documentUrl(5, true)).toBe('/api/documentos/5?ver=1')
     expect(documentUrl(5, false)).toBe('/api/documentos/5')
+  })
+})
+
+describe('client: buscador', () => {
+  it('searchFragments hace GET /api/busqueda con la pregunta codificada y sin proyecto', async () => {
+    const fetchMock = reply(200, [])
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(searchFragments('¿cuánto cuesta? & más', null)).resolves.toEqual([])
+    const url = new URL(fetchMock.mock.calls[0][0], 'http://x')
+    expect(url.pathname).toBe('/api/busqueda')
+    expect(url.searchParams.get('q')).toBe('¿cuánto cuesta? & más')
+    expect(url.searchParams.has('proyecto_id')).toBe(false)
+  })
+
+  it('searchFragments añade proyecto_id si se filtra', async () => {
+    const fetchMock = reply(200, [])
+    vi.stubGlobal('fetch', fetchMock)
+    await searchFragments('riesgos', 3)
+    expect(new URL(fetchMock.mock.calls[0][0], 'http://x').searchParams.get('proyecto_id')).toBe('3')
+  })
+
+  it('searchFragments con 503 lanza ApiError con el detail', async () => {
+    vi.stubGlobal('fetch', reply(503, { detail: 'El buscador no está disponible: Ollama no responde' }))
+    await expect(searchFragments('x', null)).rejects.toMatchObject({ status: 503, message: 'El buscador no está disponible: Ollama no responde' })
   })
 })

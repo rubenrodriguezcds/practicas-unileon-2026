@@ -364,9 +364,10 @@ def create_project(conn, nombre: str, tipo: str | None, descripcion: str | None)
 
 
 def get_project(conn, proyecto_id: int) -> dict | None:
-    """Proyecto con la lista de sus documentos (id, nombre, tamaño en bytes); None si no existe.
+    """Proyecto con la lista de sus documentos (id, nombre, tamaño, estado de indexado); None si no existe.
 
     No carga el contenido de los documentos: el tamaño sale de octet_length en la propia bbdd.
+    Un documento sin fila en `indexado` está pendiente (el indexador aún no lo ha cogido).
     """
     row = conn.execute(
         "SELECT id, nombre, tipo, descripcion FROM proyectos WHERE id = %s", (proyecto_id,)
@@ -374,11 +375,15 @@ def get_project(conn, proyecto_id: int) -> dict | None:
     if row is None:
         return None
     docs = conn.execute(
-        "SELECT id, nombre, octet_length(contenido) FROM documentos WHERE proyecto_id = %s ORDER BY lower(nombre)",
+        "SELECT d.id, d.nombre, octet_length(d.contenido), coalesce(i.estado, 'pendiente'), i.error,"
+        " (SELECT count(*) FROM fragmentos f WHERE f.documento_id = d.id)"
+        " FROM documentos d LEFT JOIN indexado i ON i.documento_id = d.id"
+        " WHERE d.proyecto_id = %s ORDER BY lower(d.nombre)",
         (proyecto_id,),
     ).fetchall()
     return {"id": row[0], "nombre": row[1], "tipo": row[2], "descripcion": row[3],
-            "documentos": [{"id": d[0], "nombre": d[1], "tamano": d[2]} for d in docs]}
+            "documentos": [{"id": d[0], "nombre": d[1], "tamano": d[2],
+                            "indexado": {"estado": d[3], "error": d[4], "fragmentos": d[5]}} for d in docs]}
 
 
 def update_project(conn, proyecto_id: int, nombre: str, tipo: str | None, descripcion: str | None) -> dict | None:
@@ -441,3 +446,63 @@ def delete_document(conn, documento_id: int) -> bool:
     borrado = conn.execute("DELETE FROM documentos WHERE id = %s RETURNING id", (documento_id,)).fetchone()
     conn.commit()
     return borrado is not None
+
+
+# --- Búsqueda del asistente (fase 1: buscador de prueba) ---
+
+# Búsqueda híbrida: dos rankings de 30 candidatos cada uno, combinados con RRF (Reciprocal Rank
+# Fusion): puntuación = 1/(60 + puesto en significado) + 1/(60 + puesto en palabras).
+#   - Significado: distancia coseno entre la pregunta y `embedding` (índice HNSW). La subconsulta
+#     ordena y corta ANTES de numerar, para que Postgres pueda usar el índice.
+#   - Palabras: `busqueda @@ q`, ordenado por ts_rank. Encuentra nombres propios, cifras y códigos
+#     que el vector puede no distinguir. `q` es `websearch_to_tsquery('spanish', unaccent(pregunta))`
+#     con sus «y» (&) cambiados por «o» (|): websearch exige TODAS las palabras, y en una pregunta
+#     («¿cuánto cuesta la migración?») casi nunca están todas en el trozo («cuánto»), así que la
+#     parte de palabras no encontraba nada. Con «o» basta una, y ts_rank ya puntúa más a los trozos
+#     que tienen más palabras de la pregunta. Las frases entre comillas (<->) se respetan.
+# Un trozo que sale en los dos rankings suma las dos partes y sube. RRF solo usa los puestos, así
+# que no hace falta poner en la misma escala el coseno y el ts_rank (que no se parecen en nada).
+_BUSCAR = """
+WITH sig AS (
+  SELECT id, 1 - dist AS sim, row_number() OVER (ORDER BY dist) AS puesto
+  FROM (SELECT id, embedding <=> %(vec)s::halfvec AS dist FROM fragmentos
+        WHERE %(pid)s::int IS NULL OR proyecto_id = %(pid)s
+        ORDER BY dist LIMIT 30) s
+), pal AS (
+  SELECT id, rango, row_number() OVER (ORDER BY rango DESC) AS puesto
+  FROM (SELECT f.id, ts_rank(f.busqueda, b.q) AS rango
+        FROM fragmentos f,
+             (SELECT replace(websearch_to_tsquery('spanish', unaccent(%(texto)s))::text, '&', '|')::tsquery AS q) b
+        WHERE f.busqueda @@ b.q AND (%(pid)s::int IS NULL OR f.proyecto_id = %(pid)s)
+        ORDER BY rango DESC LIMIT 30) p
+)
+SELECT f.documento_id, d.nombre, f.proyecto_id, pr.nombre, f.titulos, f.paginas, f.texto,
+       sig.sim, pal.rango,
+       coalesce(1.0 / (60 + sig.puesto), 0) + coalesce(1.0 / (60 + pal.puesto), 0) AS puntuacion
+FROM (SELECT id FROM sig UNION SELECT id FROM pal) ids
+JOIN fragmentos f ON f.id = ids.id
+JOIN documentos d ON d.id = f.documento_id
+JOIN proyectos pr ON pr.id = f.proyecto_id
+LEFT JOIN sig ON sig.id = f.id
+LEFT JOIN pal ON pal.id = f.id
+ORDER BY puntuacion DESC, sig.sim DESC NULLS LAST
+LIMIT %(k)s
+"""
+
+
+def search_fragments(conn, vector: list[float], texto: str, proyecto_id: int | None, k: int = 10) -> list[dict]:
+    """Los `k` trozos más parecidos a la pregunta (vector + texto), de todos los proyectos o de uno.
+
+    `puntuacion_vector` es el coseno (1 = idéntico) y `puntuacion_texto` el ts_rank; None si el
+    trozo no salió en ese ranking. `puntuacion` es la combinada (RRF), por la que se ordena.
+    """
+    filas = conn.execute(_BUSCAR, {"vec": "[" + ",".join(str(x) for x in vector) + "]",
+                                   "texto": texto, "pid": proyecto_id, "k": k}).fetchall()
+    return [{"documento_id": r[0], "documento": r[1], "proyecto_id": r[2], "proyecto": r[3],
+             "titulos": r[4], "paginas": r[5], "texto": r[6],
+             "puntuacion_vector": _redondear(r[7]), "puntuacion_texto": _redondear(r[8]),
+             "puntuacion": _redondear(r[9])} for r in filas]
+
+
+def _redondear(x) -> float | None:
+    return None if x is None else round(float(x), 4)

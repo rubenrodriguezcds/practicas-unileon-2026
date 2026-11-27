@@ -18,6 +18,9 @@
  *  - «Ver» y «Descargar» son enlaces normales: el navegador manda la cookie de sesión. «Descargar»
  *    no lleva `download`: la API ya manda `attachment`, y así, si la sesión ha caducado, la API
  *    redirige al login y el navegador lo abre (con `download` bajaría el error como si fuera el archivo).
+ *  - La columna «Asistente» dice en qué punto está el indexado de cada documento (lo hace el
+ *    contenedor indexador en segundo plano). Mientras alguno esté pendiente o indexándose, la ficha
+ *    se vuelve a pedir cada REFRESCO_MS para que el estado avance solo.
  *  - Mientras sube, cerrar o recargar la pestaña pide confirmación: cortaría las subidas pendientes.
  *    Navegar dentro de la app no las corta (las peticiones siguen aunque se cambie de pantalla).
  */
@@ -25,13 +28,17 @@
 import { useCallback, useEffect, useState, type SubmitEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
-  deleteDocument, documentUrl, getProject, updateProject, uploadDocument, type Documento, type ProyectoDetalle,
+  deleteDocument, documentUrl, getProject, updateProject, uploadDocument, type Documento, type Indexado,
+  type ProyectoDetalle,
 } from '../api/client'
 import ConfirmDialog from '../components/ConfirmDialog'
 import DropZone from '../components/DropZone'
 
 /** Tamaño máximo de un documento; debe coincidir con DOCUMENTO_MAX_MB de la API (por defecto 50). */
 const MAX_MB = 50
+
+/** Cada cuánto se vuelve a pedir la ficha mientras hay documentos por indexar. */
+const REFRESCO_MS = 5000
 
 const mensaje = (err: unknown) => (err instanceof Error ? err.message : 'Error inesperado')
 
@@ -40,6 +47,16 @@ function tamanoLegible(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
   return `${(bytes / 1024 / 1024).toFixed(1).replace('.', ',')} MB`
+}
+
+/** Texto de la columna «Asistente»; el motivo del error se ve entero al pasar el ratón. */
+function EstadoAsistente({ indexado }: { indexado: Indexado }) {
+  switch (indexado.estado) {
+    case 'pendiente': return <span>Pendiente</span>
+    case 'procesando': return <span>Indexando…</span>
+    case 'hecho': return <span>Listo ({indexado.fragmentos} trozos)</span>
+    case 'error': return <span className="error" title={indexado.error ?? ''}>Error: {indexado.error}</span>
+  }
 }
 
 type Subida = { nombre: string; estado: 'subiendo' | 'subido' | 'error'; mensaje?: string }
@@ -68,6 +85,14 @@ export default function ProyectoDetallePage() {
   useEffect(() => {
     if (idValido) cargar()
   }, [cargar, idValido])
+
+  // Mientras quede algo por indexar, se vuelve a pedir la ficha para ver avanzar el estado.
+  const porIndexar = proyecto?.documentos.some((d) => ['pendiente', 'procesando'].includes(d.indexado.estado)) ?? false
+  useEffect(() => {
+    if (!porIndexar) return
+    const t = window.setInterval(cargar, REFRESCO_MS)
+    return () => window.clearInterval(t)
+  }, [porIndexar, cargar])
 
   // Con subidas pendientes, el navegador pregunta antes de cerrar o recargar la pestaña.
   useEffect(() => {
@@ -193,13 +218,14 @@ export default function ProyectoDetallePage() {
           ) : (
             <table>
               <thead>
-                <tr><th>Nombre</th><th>Tamaño</th><th><span className="oculto">Acciones</span></th></tr>
+                <tr><th>Nombre</th><th>Tamaño</th><th>Asistente</th><th><span className="oculto">Acciones</span></th></tr>
               </thead>
               <tbody>
                 {proyecto.documentos.map((d) => (
                   <tr key={d.id}>
                     <td>{d.nombre}</td>
                     <td>{tamanoLegible(d.tamano)}</td>
+                    <td><EstadoAsistente indexado={d.indexado} /></td>
                     <td className="acciones">
                       {d.visible && <a href={documentUrl(d.id, true)} target="_blank" rel="noopener noreferrer">Ver</a>}
                       <a href={documentUrl(d.id, false)}>Descargar</a>

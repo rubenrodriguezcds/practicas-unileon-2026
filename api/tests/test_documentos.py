@@ -28,6 +28,12 @@ def test_tipo_de_office_se_descarga_sin_verse():
     assert tipo_de("x.docx").content_type == DOCX
 
 
+def test_tipo_de_visio_se_descarga_sin_verse():
+    # Los diagramas Visio se indexan para el asistente (indexador/visio.py); el navegador no los muestra.
+    assert tipo_de("arquitectura.vsdx") == TipoArchivo("application/vnd.ms-visio.drawing", False)
+    assert tipo_de("ANTIGUO.VSD") == TipoArchivo("application/vnd.visio", False)
+
+
 @pytest.mark.parametrize("nombre", ["x.html", "x.svg", "x.exe", "sin_extension", "x."])
 def test_tipo_de_rechaza_lo_no_permitido(nombre):
     assert tipo_de(nombre) is None

@@ -194,6 +194,14 @@ describe('Layout (menú)', () => {
     inRouter(<Layout user={PEPE} onLogout={vi.fn()} />)
     expect(screen.queryByRole('link', { name: 'Proyectos' })).not.toBeInTheDocument()
   })
+
+  it('la entrada «Buscador» solo la ve el administrador', () => {
+    const { unmount } = inRouter(<Layout user={ADMIN} onLogout={vi.fn()} />)
+    expect(screen.getByRole('link', { name: 'Buscador' })).toHaveAttribute('href', '/buscador')
+    unmount()
+    inRouter(<Layout user={PEPE} onLogout={vi.fn()} />)
+    expect(screen.queryByRole('link', { name: 'Buscador' })).not.toBeInTheDocument()
+  })
 })
 
 // Cubre el guard de sesión: errores de me() distintos de 401 y que no se queden pegados tras logout.
@@ -288,6 +296,21 @@ describe('App', () => {
     expect(await screen.findByText('Hola, pepe')).toBeInTheDocument()
     unmount()
     inRouter(<App />, '/proyectos/1')
+    expect(await screen.findByText('Hola, pepe')).toBeInTheDocument()
+    expect(listProjects).not.toHaveBeenCalled()
+  })
+
+  it('el administrador llega a /buscador desde el menú', async () => {
+    vi.mocked(me).mockResolvedValue(ADMIN)
+    vi.mocked(listProjects).mockResolvedValue([])
+    inRouter(<App />)
+    await userEvent.click(await screen.findByRole('link', { name: 'Buscador' }))
+    expect(await screen.findByRole('heading', { name: 'Buscador' })).toBeInTheDocument()
+  })
+
+  it('un usuario normal que escribe /buscador a mano vuelve a la home', async () => {
+    vi.mocked(me).mockResolvedValue(PEPE)
+    inRouter(<App />, '/buscador')
     expect(await screen.findByText('Hola, pepe')).toBeInTheDocument()
     expect(listProjects).not.toHaveBeenCalled()
   })

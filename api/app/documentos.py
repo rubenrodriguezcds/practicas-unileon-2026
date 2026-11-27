@@ -48,6 +48,9 @@ _TIPOS: dict[str, TipoArchivo] = {
     "odt": TipoArchivo(f"{_ODF}.text", False),
     "ods": TipoArchivo(f"{_ODF}.spreadsheet", False),
     "odp": TipoArchivo(f"{_ODF}.presentation", False),
+    # Diagramas Visio: el indexador saca su texto y sus conexiones para el asistente.
+    "vsdx": TipoArchivo("application/vnd.ms-visio.drawing", False),
+    "vsd": TipoArchivo("application/vnd.visio", False),
 }
 
 
