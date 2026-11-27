@@ -44,5 +44,5 @@ def test_documento_max_mb_por_defecto_y_minimo():
 def test_ollama_por_defecto():
     """El buscador usa bge-m3 en el Ollama local salvo que el .env diga otra cosa (túnel en desarrollo)."""
     s = make_settings()
-    assert (s.ollama_url, s.embeddings_modelo) == ("http://localhost:11434", "bge-m3")
+    assert (s.ollama_url, s.embeddings_modelo, s.chat_modelo) == ("http://localhost:11434", "bge-m3", "gemma4:e2b")
     assert make_settings(ollama_url="http://host.docker.internal:11435/").ollama_url == "http://host.docker.internal:11435"
