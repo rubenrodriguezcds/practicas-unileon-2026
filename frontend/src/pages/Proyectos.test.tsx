@@ -31,6 +31,7 @@ vi.mock('../api/client', async (orig) => ({
   uploadDocument: vi.fn(),
   deleteDocument: vi.fn(),
   updateProject: vi.fn(),
+  listValidations: vi.fn().mockResolvedValue([]),
 }))
 
 beforeAll(() => {

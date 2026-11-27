@@ -3,7 +3,8 @@
  *
  * Para qué: ver y editar el nombre, tipo y descripción del proyecto; la tabla de sus documentos con «Ver»
  * (solo los que el navegador sabe mostrar), «Descargar» y «Borrar»; y subir documentos nuevos
- * arrastrándolos (varios a la vez) a la zona de components/DropZone.tsx.
+ * arrastrándolos (varios a la vez) a la zona de components/DropZone.tsx. Debajo, la sección de
+ * validaciones de contenido (components/Validaciones.tsx).
  *
  * Quién lo usa: App.tsx, en la ruta /proyectos/:id, solo si el usuario es administrador. Se llega
  * desde el listado de Proyectos.tsx.
@@ -33,6 +34,7 @@ import {
 } from '../api/client'
 import ConfirmDialog from '../components/ConfirmDialog'
 import DropZone from '../components/DropZone'
+import Validaciones from '../components/Validaciones'
 
 /** Tamaño máximo de un documento; debe coincidir con DOCUMENTO_MAX_MB de la API (por defecto 50). */
 const MAX_MB = 50
@@ -236,6 +238,8 @@ export default function ProyectoDetallePage() {
               </tbody>
             </table>
           )}
+
+          <Validaciones proyectoId={id} />
         </>
       )}
 
