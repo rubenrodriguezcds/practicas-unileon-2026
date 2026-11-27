@@ -45,6 +45,9 @@ services:
       test: ["CMD", "curl", "-fs", "http://localhost:5001/health"]
       interval: 10s
       retries: 30
+    # Un documento muy pesado puede tumbarlo por memoria: Docker lo levanta solo (~1 min), dentro
+    # de lo que esperan los reintentos del indexador (1 y 2 min), así el documento no llega a «error».
+    restart: unless-stopped
 
   # Indexador: en segundo plano convierte, trocea y vectoriza los documentos subidos y los guarda
   # en Postgres (ver indexador/README.md). Sin puertos publicados.
