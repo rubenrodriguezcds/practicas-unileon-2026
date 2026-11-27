@@ -31,7 +31,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import Settings, get_settings
 from app.migrations import migrate
-from app.routers import auth, busqueda, captcha, proyectos, roles, usuarios
+from app.routers import auth, busqueda, captcha, proyectos, roles, usuarios, validaciones
 from app.spa import mount_spa
 
 logger = logging.getLogger(__name__)
@@ -70,6 +70,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(proyectos.router)
     app.include_router(proyectos.documentos_router)
     app.include_router(busqueda.router)
+    app.include_router(validaciones.proyectos_router)
+    app.include_router(validaciones.router)
 
     @app.middleware("http")
     async def limite_documentos(request: Request, call_next):

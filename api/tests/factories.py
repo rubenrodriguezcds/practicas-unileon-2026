@@ -10,7 +10,9 @@ Qué hay:
   - `solve_captcha(settings)`: resuelve un reto ALTCHA de verdad, como haría el navegador.
 """
 
+import re
 import time
+import unicodedata
 
 import altcha
 
@@ -20,6 +22,11 @@ from app.security import hash_password
 
 SECRET = "0123456789abcdef0123456789abcdef0123456789abcdef"
 ALTCHA_KEY = "altcha-test-0123456789abcdef0123456789abcdef"
+
+
+def _sin_acentos(texto: str) -> str:
+    """Como `unaccent` de Postgres: quita tildes y diéresis («MIGRACIÓN» → «MIGRACION»)."""
+    return "".join(c for c in unicodedata.normalize("NFD", texto) if unicodedata.category(c) != "Mn")
 
 
 def make_settings(**changes) -> Settings:
@@ -69,6 +76,11 @@ class FakeDB:
         self.fragmentos = {}  # documento_id → número de trozos
         self.resultados_busqueda = []  # lo que devuelve search_fragments
         self.busquedas = []  # (vector, texto, proyecto_id) de cada búsqueda
+        self.validaciones = {}  # id → {"proyecto_id", "nombre", "tipo", "criterio", "orden"}
+        self.resultados = {}  # validacion_id → {"estado", "explicacion", "resumen", "fragmentos", "ejecutada"}
+        self.pruebas = {}  # fragmento_id → {"documento_id", "documento", "paginas", "texto"}
+        self.next_validation_id = 1
+        self.trozos = {}  # fragmento_id → {"proyecto_id", "documento_id", "texto"} (para los patrones)
         self.next_project_id = 1
         self.next_document_id = 1
 
@@ -90,7 +102,10 @@ class FakeDB:
                      "update_project",
                      "add_document", "get_document", "delete_document",
                      "list_users", "get_user", "create_user", "update_user", "delete_users",
-                     "add_user_role", "remove_user_role", "search_fragments"):
+                     "add_user_role", "remove_user_role", "search_fragments",
+                     "patron_valido", "list_validations", "create_validation", "update_validation",
+                     "delete_validation", "get_validation", "run_pattern", "save_result", "document_counts",
+                     "get_fragments"):
             monkeypatch.setattr(db, name, getattr(self, name))
         return FakeConn(self)
 
@@ -224,6 +239,8 @@ class FakeDB:
         if self.proyectos.pop(pid, None) is None:
             return False
         self.documentos = {did: d for did, d in self.documentos.items() if d["proyecto_id"] != pid}  # cascada
+        for vid in [v for v, val in self.validaciones.items() if val["proyecto_id"] == pid]:
+            self.delete_validation(conn, vid)
         return True
 
     def add_document(self, conn, pid, nombre, contenido):
@@ -306,3 +323,81 @@ class FakeDB:
     def search_fragments(self, conn, vector, texto, proyecto_id, k=10):
         self.busquedas.append((vector, texto, proyecto_id))
         return self.resultados_busqueda[:k]
+
+
+    # --- Validaciones ---
+
+    def patron_valido(self, conn, patron):
+        # Python no conoce \m, \M ni \y (inicio, fin y borde de palabra en Postgres): se traducen a \b.
+        try:
+            re.compile(re.sub(r"\\[mMy]", r"\\b", patron))
+        except re.error as e:
+            return str(e)
+        return None
+
+    def _validacion(self, vid):
+        v = {"id": vid, **self.validaciones[vid], "resultado": None}
+        if (r := self.resultados.get(vid)) is not None:
+            v["resultado"] = {"estado": r["estado"], "explicacion": r["explicacion"], "resumen": r["resumen"],
+                              "ejecutada": r["ejecutada"],
+                              "pruebas": [self.pruebas[f] for f in r["fragmentos"] if f in self.pruebas]}
+        return v
+
+    def list_validations(self, conn, pid):
+        if pid not in self.proyectos:
+            return None
+        vids = [v for v, val in self.validaciones.items() if val["proyecto_id"] == pid]
+        return [self._validacion(v) for v in sorted(vids, key=lambda v: (self.validaciones[v]["orden"], v))]
+
+    def create_validation(self, conn, pid, nombre, tipo, criterio):
+        if pid not in self.proyectos:
+            return None
+        orden = max((v["orden"] for v in self.validaciones.values() if v["proyecto_id"] == pid), default=0) + 1
+        vid, self.next_validation_id = self.next_validation_id, self.next_validation_id + 1
+        self.validaciones[vid] = {"proyecto_id": pid, "nombre": nombre, "tipo": tipo, "criterio": criterio, "orden": orden}
+        return self._validacion(vid)
+
+    def update_validation(self, conn, vid, nombre, tipo, criterio):
+        if vid not in self.validaciones:
+            return None
+        self.validaciones[vid].update(nombre=nombre, tipo=tipo, criterio=criterio)
+        self.resultados.pop(vid, None)
+        return self._validacion(vid)
+
+    def delete_validation(self, conn, vid):
+        self.resultados.pop(vid, None)
+        return self.validaciones.pop(vid, None) is not None
+
+    def add_fragment(self, pid, did, texto, paginas):
+        """Atajo de los tests: un trozo indexado del documento `did` (y su prueba)."""
+        fid = len(self.trozos) + 1
+        self.trozos[fid] = {"proyecto_id": pid, "documento_id": did, "texto": texto}
+        self.pruebas[fid] = {"documento_id": did, "documento": self.documentos[did]["nombre"],
+                             "paginas": paginas, "texto": texto}
+        return fid
+
+    def get_validation(self, conn, vid):
+        return self._validacion(vid) if vid in self.validaciones else None
+
+    def run_pattern(self, conn, pid, patron):
+        try:
+            regex = re.compile(re.sub(r"\\[mMy]", r"\\b", _sin_acentos(patron)), re.IGNORECASE)
+        except re.error as e:
+            raise db.PatronNoValido(str(e)) from None
+        coinciden = [fid for fid, t in sorted(self.trozos.items(), key=lambda x: (x[1]["documento_id"], x[0]))
+                     if t["proyecto_id"] == pid and regex.search(_sin_acentos(t["texto"]))]
+        primeros = list({self.trozos[f]["documento_id"]: f for f in reversed(coinciden)}.values())[::-1]
+        return {"trozos": len(coinciden), "documentos": len(primeros), "fragmentos": primeros,
+                **self.document_counts(conn, pid)}
+
+    def document_counts(self, conn, pid):
+        docs = [did for did, d in self.documentos.items() if d["proyecto_id"] == pid]
+        hechos = [did for did in docs if self.indexado.get(did, {}).get("estado") == "hecho"]
+        return {"indexados": len(hechos), "pendientes": len(docs) - len(hechos)}
+
+    def get_fragments(self, conn, ids):
+        return [{k: self.pruebas[i][k] for k in ("documento", "paginas", "texto")} for i in ids if i in self.pruebas]
+
+    def save_result(self, conn, vid, estado, explicacion, fragmentos, resumen=None):
+        self.resultados[vid] = {"estado": estado, "explicacion": explicacion, "resumen": resumen,
+                                "fragmentos": list(fragmentos), "ejecutada": "2026-11-27T12:00:00+00:00"}
